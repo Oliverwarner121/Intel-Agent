@@ -21,3 +21,13 @@ describe("getServerEnv", () => {
     expect((error as ConfigError).message).not.toContain("short-secret-value");
   });
 });
+
+describe("getServerEnv Google settings", () => {
+  it("treats blank optional values as unset", () => {
+    expect(getServerEnv({ CRON_SECRET: secret, GOOGLE_CLIENT_ID: " ", GOOGLE_REFRESH_TOKEN: "token" })).toEqual({
+      APP_ENV: "local",
+      CRON_SECRET: secret,
+      GOOGLE_REFRESH_TOKEN: "token",
+    });
+  });
+});

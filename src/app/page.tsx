@@ -18,6 +18,9 @@ export default function Home() {
           </li>
         ))}
       </ul>
+      <p>
+        <a href="/privacy">Privacy policy</a>
+      </p>
     </main>
   );
 }

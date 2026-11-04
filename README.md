@@ -3,7 +3,8 @@ Daily agent emails you desired information for the day
 
 ## Project status
 
-Phase 1 (foundation) is implemented and mock-tested; nothing is deployed yet.
+Phase 1 (foundation) is deployed to `intel-agent-dev` and `intel-agent-prod`.
+Phase 2 (Google Calendar) is implemented and verified against a live calendar.
 V1 will deliver a morning email with calendar data, weather and selected news
 headlines with source links. It will not use an LLM or generated summaries.
 
@@ -18,12 +19,16 @@ Implemented:
   single delivery attempt per run.
 - Protected Cron route `GET /api/cron/morning-briefing` (Bearer `CRON_SECRET`),
   returning only a safe run summary.
+- Google Calendar provider (read-only OAuth refresh token): today's
+  `Europe/London` events including all-day, multi-day and expanded recurring
+  events and working locations; cancelled and declined events are skipped; all-day
+  events are listed first, then timed events by start time.
 - GMT/BST-aware date utilities, bounded-retry JSON HTTP helper, structured
   logger and request-time environment validation.
 
-Not yet implemented: Google Calendar, Resend email, Open-Meteo weather and news
-providers (Phases 2–5). Until then every section reports "not configured" and
-no email is sent.
+Not yet implemented: Resend email, Open-Meteo weather and news providers
+(Phases 3–5). Until then those sections report "not configured" and no email is
+sent. A provider whose credentials are missing is reported the same way.
 
 ## Local development
 
@@ -39,6 +44,30 @@ curl -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/mor
 Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 Only `APP_ENV=prod` may send email; `local` and `dev` always run as previews.
 Tests mock all external services and never send email.
+
+### Google Calendar setup
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a
+   project and enable the **Google Calendar API**.
+2. Under **Google Auth Platform**, configure the consent screen with audience
+   **External**, then **publish the app** (In production). Apps left in
+   *Testing* get refresh tokens that expire after 7 days. Publishing an External
+   app requires an app name, support email, home page
+   (`https://intel-agent-prod.vercel.app`) and privacy policy link
+   (`https://intel-agent-prod.vercel.app/privacy`) under **Branding**; leave the
+   logo empty to avoid verification. Unverified personal use is fine; Google
+   shows an "unverified app" warning (choose **Advanced → Go to Intel-Agent**).
+3. Create an OAuth client of type **Desktop app** (leave "AI-powered agent"
+   unticked) and copy its ID and secret
+   into `.env.local` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+4. Run `npm run google:auth`, open the printed link, sign in and grant
+   read-only calendar access. The script verifies access and saves
+   `GOOGLE_REFRESH_TOKEN` to `.env.local`. On a remote shell where the browser
+   cannot reach the callback, paste the final browser address into the terminal.
+5. Add the three values to both Vercel projects (Production, Sensitive).
+
+If the token is revoked or expires, the calendar section reports "Google
+authorisation failed" and the rest of the briefing continues; rerun step 4.
 
 ## Copilot customisations
 
@@ -111,6 +140,10 @@ Set these **Production** environment variables in each Vercel project:
 | --- | --- | --- |
 | `APP_ENV` | `dev` | `prod` |
 | `CRON_SECRET` | random, `openssl rand -hex 32` | a different random value |
+| `GOOGLE_CLIENT_ID` | OAuth client ID | same |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret | same |
+| `GOOGLE_REFRESH_TOKEN` | from `npm run google:auth` | same |
+| `GOOGLE_CALENDAR_ID` | optional, defaults to `primary` | same |
 
 Projects can be created in the Vercel dashboard by importing the repository
 (Next.js preset; variables scoped to Production). The first import builds once;

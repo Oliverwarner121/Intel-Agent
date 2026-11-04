@@ -3,7 +3,7 @@
 ## Scope and status
 
 - Intel-Agent is a personal, configuration-driven briefing platform. V1 implements only the morning email; additional briefings remain future work.
-- Phase 1 (foundation) exists: registry, orchestrator, date/HTTP/logger utilities, env validation and the protected Cron route. Calendar, email, weather and news providers are not implemented yet. Inspect the repository before changes; do not assume proposed paths exist.
+- Phase 1 (foundation) exists: registry, orchestrator, date/HTTP/logger utilities, env validation and the protected Cron route. Phase 2 adds the Google Calendar provider (`src/services/providers/calendar`, OAuth helper `npm run google:auth`). Email, weather and news providers are not implemented yet. Inspect the repository before changes; do not assume proposed paths exist.
 - Deployment and live email sends require the owner's explicit approval. Only `APP_ENV=prod` may send.
 - GitHub Actions deploys `main` to `intel-agent-dev` via GitHub environment `development`; manual releases select a successful dev run's source commit for `intel-agent-prod` via `production`. Both are Vercel Production targets, so use an explicit application environment guard, not `VERCEL_ENV`, to distinguish them. Remove Cron from dev and disable automatic Vercel Git deployments.
 - V1 has no LLM, AI-generated summaries or introductions. Display verified calendar and weather data plus selected news headlines, publishers, publication times and source links.

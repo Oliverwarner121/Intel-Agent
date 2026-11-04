@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "google:auth": "node --use-system-ca --env-file-if-exists=.env.local scripts/google-calendar-auth.mjs"
   },
   "dependencies": {
     "next": "16.4.5",

@@ -1,0 +1,170 @@
+name: Validate and deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy development or release a tested development commit
+        type: choice
+        options:
+          - deploy-development
+          - promote-production
+        default: deploy-development
+        required: true
+      development_run_id:
+        description: Successful development run ID (required for promote-production)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ inputs.operation == 'promote-production' && 'production-release' || format('validate-deploy-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      app_ready: ${{ steps.foundation.outputs.app_ready }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Note validation-only manual run
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: echo "::notice::Manual run on a non-main branch validates only; deployments require main."
+      - name: Test workflow helpers
+        run: node --test .github/scripts/*.test.cjs
+      - name: Check application foundation
+        id: foundation
+        env:
+          DEPLOY_ENABLED: ${{ vars.DEPLOY_ENABLED }}
+        run: |
+          if [ ! -f package.json ]; then
+            if [ "$DEPLOY_ENABLED" = "true" ]; then
+              echo "::error::Deployment is enabled but the application has not been scaffolded."
+              exit 1
+            fi
+            echo "app_ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Repository-only checks passed. Application checks and deployments are disabled until scaffolding."
+            echo "Application not scaffolded: no application validation or deployment performed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          test -f package-lock.json
+          echo "app_ready=true" >> "$GITHUB_OUTPUT"
+      - name: Validate application
+        if: steps.foundation.outputs.app_ready == 'true'
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Explain disabled deployments
+        if: vars.DEPLOY_ENABLED != 'true'
+        run: echo "Deployment is disabled. Configure both environments and set repository variable DEPLOY_ENABLED=true when ready." >> "$GITHUB_STEP_SUMMARY"
+
+  resolve-release:
+    name: Resolve release commit
+    needs: validate
+    if: vars.DEPLOY_ENABLED == 'true' && needs.validate.outputs.app_ready == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve current or verified development commit
+        id: release
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          OPERATION: ${{ inputs.operation }}
+          DEVELOPMENT_RUN_ID: ${{ inputs.development_run_id }}
+        with:
+          script: |
+            const { verifyDevelopmentRelease } = require('./.github/scripts/verify-development-release.cjs');
+            const commit = process.env.OPERATION === 'promote-production'
+              ? await verifyDevelopmentRelease({
+                  github, repository: context.repo, runId: process.env.DEVELOPMENT_RUN_ID
+                })
+              : context.sha;
+            core.setOutput('commit', commit);
+            await core.summary.addHeading('Selected release').addCodeBlock(commit).write();
+
+  deploy:
+    name: ${{ inputs.operation == 'promote-production' && 'Deploy production' || 'Deploy development' }}
+    needs: resolve-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: ${{ inputs.operation == 'promote-production' && 'prod' || 'dev' }}
+      url: ${{ steps.deployment.outputs.url }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      RELEASE_TARGET: ${{ inputs.operation == 'promote-production' && 'prod' || 'dev' }}
+      RELEASE_COMMIT: ${{ needs.resolve-release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-release.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Validate deployment credentials
+        run: |
+          for key in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "$(printenv "$key")" ]; then
+              echo "::error::Missing environment secret: $key"
+              exit 1
+            fi
+          done
+      - name: Install locked application dependencies
+        run: npm ci
+      - name: Prepare isolated deployment configuration
+        run: node .github/scripts/prepare-deployment.cjs "$RELEASE_TARGET"
+      - name: Pull Vercel project configuration
+        run: npx --yes vercel@65.11.0 pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Build for selected project
+        run: npx --yes vercel@65.11.0 build --prod --token="$VERCEL_TOKEN"
+      - name: Deploy prebuilt application
+        id: deployment
+        run: |
+          url="$(npx --yes vercel@65.11.0 deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
+          if [[ ! "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]; then
+            echo "::error::Vercel did not return an expected deployment URL."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Deployment accepted by Vercel"
+            echo "Target: $RELEASE_TARGET"
+            echo "Commit: $RELEASE_COMMIT"
+            echo "URL: $url"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Show production release instructions
+        if: env.RELEASE_TARGET == 'dev'
+        run: |
+          {
+            echo "After testing dev, run this workflow from main with operation promote-production."
+            echo "Use development run ID: $GITHUB_RUN_ID"
+            echo "Production rebuilds this source commit with prod configuration; it does not reuse dev secrets or build output."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -3,9 +3,42 @@ Daily agent emails you desired information for the day
 
 ## Project status
 
-Planning stage: the application has not been scaffolded or deployed.
+Phase 1 (foundation) is implemented and mock-tested; nothing is deployed yet.
 V1 will deliver a morning email with calendar data, weather and selected news
 headlines with source links. It will not use an LLM or generated summaries.
+
+Implemented:
+
+- Next.js App Router app with strict TypeScript, ESLint, Vitest and Zod.
+- Briefing definition schema and registry with the `morning-briefing`
+  definition (section order, news limits, `Europe/London` timezone and the
+  `0 5 * * *` UTC schedule, kept in sync with [vercel.json](vercel.json) by tests).
+- Generic orchestrator: concurrent section collection, per-section timeouts,
+  isolated provider failures (empty vs unavailable), preview/send modes and a
+  single delivery attempt per run.
+- Protected Cron route `GET /api/cron/morning-briefing` (Bearer `CRON_SECRET`),
+  returning only a safe run summary.
+- GMT/BST-aware date utilities, bounded-retry JSON HTTP helper, structured
+  logger and request-time environment validation.
+
+Not yet implemented: Google Calendar, Resend email, Open-Meteo weather and news
+providers (Phases 2–5). Until then every section reports "not configured" and
+no email is sent.
+
+## Local development
+
+Requires Node.js 24.
+
+```sh
+npm ci
+cp .env.example .env.local   # set CRON_SECRET (openssl rand -hex 32)
+npm run dev
+curl -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/morning-briefing
+```
+
+Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
+Only `APP_ENV=prod` may send email; `local` and `dev` always run as previews.
+Tests mock all external services and never send email.
 
 ## Copilot customisations
 
@@ -20,7 +53,7 @@ The initial reusable workflows are:
 - [Production readiness](.github/skills/production-readiness/SKILL.md)
 
 These customisations do not implement integrations or authorise deployment and
-live email sends. Application implementation awaits approval of the phased plan.
+live email sends.
 
 ## GitHub Actions deployment pipeline
 
@@ -69,7 +102,20 @@ Disable Vercel's automatic Git deployments in **both projects before connecting
 or releasing**. The committed [Vercel configuration](vercel.json) also disables
 them, so Git pushes must not bypass the manual production gate.
 The deployment helper removes `crons` from the dev deployment configuration and
-preserves them for prod. No Cron job is configured at this planning stage.
+preserves them for prod, so only `intel-agent-prod` runs the morning Cron job.
+
+Set these **Production** environment variables in each Vercel project:
+
+| Variable | `intel-agent-dev` | `intel-agent-prod` |
+| --- | --- | --- |
+| `APP_ENV` | `dev` | `prod` |
+| `CRON_SECRET` | random, `openssl rand -hex 32` | a different random value |
+
+If you create the projects in the Vercel dashboard (which requires importing
+the repository), disconnect the Git repository afterwards under **Settings →
+Git** so only GitHub Actions deploys. Project and org IDs are under
+**Settings → General**; the org/team ID is under your account or team
+**Settings**.
 
 ### Enabling deployments
 

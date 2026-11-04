@@ -1,15 +1,23 @@
 import type { ServerEnv } from "@/config/env";
 import type { OrchestratorDependencies, RunMode } from "@/services/orchestration/briefing-orchestrator.service";
+import {
+  createGoogleCalendarProvider,
+  googleCalendarConfigFrom,
+} from "@/services/providers/calendar/google-calendar.provider";
+import type { ProviderRegistry } from "@/types/briefing";
 
 /**
- * Production wiring of providers and delivery. Real providers are added in
- * later phases (Calendar, Email, Weather, News). Until then their sections are
- * reported as unavailable rather than filled with placeholder data.
+ * Production wiring of providers and delivery. A provider is registered only
+ * when its credentials are configured; otherwise its sections are reported as
+ * unavailable rather than filled with placeholder data.
  */
-export function createBriefingDependencies(): OrchestratorDependencies {
-  return {
-    providers: { calendar: {}, weather: {}, news: {} },
-  };
+export function createBriefingDependencies(env: ServerEnv): OrchestratorDependencies {
+  const providers: ProviderRegistry = { calendar: {}, weather: {}, news: {} };
+
+  const googleCalendar = googleCalendarConfigFrom(env);
+  if (googleCalendar) providers.calendar["google-calendar"] = createGoogleCalendarProvider(googleCalendar);
+
+  return { providers };
 }
 
 /**

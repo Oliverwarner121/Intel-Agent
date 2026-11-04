@@ -113,7 +113,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment:
-      name: ${{ inputs.operation == 'promote-production' && 'prod' || 'dev' }}
+      name: ${{ inputs.operation == 'promote-production' && 'production' || 'development' }}
       url: ${{ steps.deployment.outputs.url }}
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

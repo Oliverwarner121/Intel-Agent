@@ -1,0 +1,88 @@
+name: Weekly dependency updates
+
+# Opens or refreshes one pull request every Monday with all dependency updates and
+# security fixes for manual review. Never approves or merges the pull request.
+# Per-PR recommendations come from dependency-report.yml.
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-dependency-updates
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Build weekly dependency pull request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    env:
+      BRANCH: deps/weekly
+      # Optional fine-grained token (contents, pull requests and workflows: write). With it,
+      # action pins are updated too and CI runs on the pull request automatically.
+      UPDATE_TOKEN: ${{ secrets.DEPENDENCY_UPDATE_TOKEN || github.token }}
+      HAS_UPDATE_TOKEN: ${{ secrets.DEPENDENCY_UPDATE_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Update dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=("$RUNNER_TEMP/summary.md")
+          if [ "$HAS_UPDATE_TOKEN" = "true" ]; then args+=(--apply-actions); fi
+          node .github/scripts/weekly-dependency-update.cjs "${args[@]}"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push branch and open pull request for manual review
+        id: publish
+        env:
+          GH_TOKEN: ${{ env.UPDATE_TOKEN }}
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Everything is already up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add -A
+          git commit -m "chore(deps): weekly dependency updates $(date -u +%Y-%m-%d)"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+
+          title="chore(deps): weekly dependency updates $(date -u +%Y-%m-%d)"
+          number="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$number" \
+              -f title="$title" -F body=@"$RUNNER_TEMP/summary.md" > /dev/null
+          else
+            gh label create dependencies --color 0366d6 \
+              --description "Dependency updates" --force > /dev/null
+            gh pr create --base main --head "$BRANCH" --title "$title" \
+              --body-file "$RUNNER_TEMP/summary.md" --label dependencies
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # Pushes made with the default token do not trigger pull_request workflows, so start
+      # validation on the branch; its checks appear on the pull request's head commit.
+      - name: Start CI on the update branch
+        if: steps.publish.outputs.changed == 'true' && env.HAS_UPDATE_TOKEN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run validate-and-deploy.yml --ref "$BRANCH"

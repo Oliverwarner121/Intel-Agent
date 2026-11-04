@@ -75,32 +75,33 @@ Create these GitHub environments and Vercel projects:
 
 | GitHub environment | Vercel project |
 | --- | --- |
-| `dev` | `intel-agent-dev` |
-| `prod` | `intel-agent-prod` |
+| `development` | `intel-agent-dev` |
+| `production` | `intel-agent-prod` |
 
 In **each GitHub environment**, configure environment secrets:
 
-- `VERCEL_TOKEN`: a Vercel deployment token.
+- `VERCEL_TOKEN`: a Vercel token, ideally scoped to that environment's project.
 - `VERCEL_ORG_ID`: the project's owning account/team ID.
 - `VERCEL_PROJECT_ID`: that environment's project ID. Dev and prod must reference
   different projects.
 
 Configure environment deployment branch restrictions to allow only `main`.
 Where your GitHub plan/repository visibility supports required reviewers, add
-them to `prod` for an additional approval gate. The workflow itself always
+them to `production` for an additional approval gate. The workflow itself always
 requires manual dispatch for production.
 
 Store application secrets in each **Vercel project's Production environment**,
 not in workflow YAML. Both projects use Vercel's `--prod` deployment target for
-stable project domains; GitHub `dev` does not mean Vercel Preview.
+stable project domains; GitHub `development` does not mean Vercel Preview.
 Use separate dev credentials and a safe test recipient. When the application is
 implemented, require an explicit application setting such as `APP_ENV=dev` or
 `APP_ENV=prod` to guard scheduled sending: `VERCEL_ENV` is `production` in both
 projects and cannot distinguish them.
 
-Disable Vercel's automatic Git deployments in **both projects before connecting
-or releasing**. The committed [Vercel configuration](vercel.json) also disables
-them, so Git pushes must not bypass the manual production gate.
+The committed [Vercel configuration](vercel.json) sets
+`git.deploymentEnabled: false`, so the projects can stay connected to the
+repository without Git pushes deploying and bypassing the manual production
+gate. Branches created before that file existed are not covered.
 The deployment helper removes `crons` from the dev deployment configuration and
 preserves them for prod, so only `intel-agent-prod` runs the morning Cron job.
 
@@ -111,11 +112,11 @@ Set these **Production** environment variables in each Vercel project:
 | `APP_ENV` | `dev` | `prod` |
 | `CRON_SECRET` | random, `openssl rand -hex 32` | a different random value |
 
-If you create the projects in the Vercel dashboard (which requires importing
-the repository), disconnect the Git repository afterwards under **Settings →
-Git** so only GitHub Actions deploys. Project and org IDs are under
-**Settings → General**; the org/team ID is under your account or team
-**Settings**.
+Projects can be created in the Vercel dashboard by importing the repository
+(Next.js preset; variables scoped to Production). The first import builds once;
+after that only GitHub Actions deploys. Project IDs are under the project's
+**Settings → General**; the team ID is under the team's **Settings → General**;
+tokens are under **Account Settings → Tokens**.
 
 ### Enabling deployments
 

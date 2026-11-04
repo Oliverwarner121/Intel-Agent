@@ -5,6 +5,7 @@
 - Intel-Agent is a personal, configuration-driven briefing platform. V1 implements only the morning email; additional briefings remain future work.
 - The application has not been scaffolded. Do not assume proposed paths, scripts or integrations exist. Inspect the repository before changes.
 - Application implementation requires the owner's approval of the implementation plan. Customisation-only approval does not authorise scaffolding, deployment or live email sends.
+- GitHub Actions deploys `main` to `intel-agent-dev` via environment `dev`; manual releases select a successful dev run's source commit for `intel-agent-prod` via `prod`. Both are Vercel Production targets, so use an explicit application environment guard, not `VERCEL_ENV`, to distinguish them. Remove Cron from dev and disable automatic Vercel Git deployments.
 - V1 has no LLM, AI-generated summaries or introductions. Display verified calendar and weather data plus selected news headlines, publishers, publication times and source links.
 
 ## Architecture and stack

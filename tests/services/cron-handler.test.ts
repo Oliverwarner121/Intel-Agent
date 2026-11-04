@@ -26,7 +26,7 @@ describe("isAuthorizedCronRequest", () => {
 
 describe("handleCronRequest", () => {
   it("rejects unauthenticated requests before running anything", async () => {
-    const dependencies = vi.fn(createBriefingDependencies);
+    const dependencies = vi.fn(() => createBriefingDependencies(env("prod")()));
     const response = await handleCronRequest(request("Bearer wrong"), "morning-briefing", {
       env: env("prod"),
       dependencies,
@@ -45,7 +45,7 @@ describe("handleCronRequest", () => {
 
   it("previews outside prod and returns a safe summary", async () => {
     const delivery = vi.fn<BriefingDelivery>();
-    const dependencies = (): OrchestratorDependencies => ({ ...createBriefingDependencies(), delivery });
+    const dependencies = (): OrchestratorDependencies => ({ ...createBriefingDependencies(env("dev")()), delivery });
     const response = await handleCronRequest(request(`Bearer ${SECRET}`), "morning-briefing", {
       env: env("dev"),
       dependencies,
@@ -65,7 +65,7 @@ describe("handleCronRequest", () => {
     const delivery = vi.fn<BriefingDelivery>().mockRejectedValue(new Error("boom"));
     const response = await handleCronRequest(request(`Bearer ${SECRET}`), "morning-briefing", {
       env: env("prod"),
-      dependencies: () => ({ ...createBriefingDependencies(), delivery }),
+      dependencies: () => ({ ...createBriefingDependencies(env("dev")()), delivery }),
     });
     expect(response.status).toBe(502);
     expect(delivery).toHaveBeenCalledTimes(1);
@@ -75,5 +75,18 @@ describe("handleCronRequest", () => {
     const response = await handleCronRequest(request(`Bearer ${SECRET}`), "unknown-briefing", { env: env("prod") });
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "Briefing run failed" });
+  });
+});
+
+describe("createBriefingDependencies", () => {
+  it("registers Google Calendar only when its credentials are configured", () => {
+    expect(createBriefingDependencies(env("dev")()).providers.calendar["google-calendar"]).toBeUndefined();
+    const configured = createBriefingDependencies({
+      ...env("dev")(),
+      GOOGLE_CLIENT_ID: "id",
+      GOOGLE_CLIENT_SECRET: "secret",
+      GOOGLE_REFRESH_TOKEN: "token",
+    });
+    expect(configured.providers.calendar["google-calendar"]).toBeTypeOf("function");
   });
 });

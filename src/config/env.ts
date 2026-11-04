@@ -1,8 +1,18 @@
 import { z } from "zod";
 
+/** Optional integration secret: blank values are treated as unset. */
+const optionalSecret = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
+
 const serverEnvSchema = z.object({
   APP_ENV: z.enum(["local", "dev", "prod"]).default("local"),
   CRON_SECRET: z.string().min(32, "must be at least 32 characters"),
+  GOOGLE_CLIENT_ID: optionalSecret,
+  GOOGLE_CLIENT_SECRET: optionalSecret,
+  GOOGLE_REFRESH_TOKEN: optionalSecret,
+  GOOGLE_CALENDAR_ID: optionalSecret,
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

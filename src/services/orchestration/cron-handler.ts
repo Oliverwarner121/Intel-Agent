@@ -58,7 +58,7 @@ export async function handleCronRequest(
     const run = await runBriefing(
       briefingId,
       runModeFor(env),
-      (options.dependencies ?? createBriefingDependencies)(),
+      options.dependencies ? options.dependencies() : createBriefingDependencies(env),
     );
     return json(summariseRun(run), run.status === "delivery-failed" ? 502 : 200);
   } catch (error) {

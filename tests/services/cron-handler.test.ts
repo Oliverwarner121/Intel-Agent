@@ -45,7 +45,9 @@ describe("handleCronRequest", () => {
 
   it("previews outside prod and returns a safe summary", async () => {
     const delivery = vi.fn<BriefingDelivery>();
-    const dependencies = (): OrchestratorDependencies => ({ ...createBriefingDependencies(env("dev")()), delivery });
+    const dependencies = (): OrchestratorDependencies => ({
+      providers: { calendar: {}, weather: {}, news: {} }, delivery,
+    });
     const response = await handleCronRequest(request(`Bearer ${SECRET}`), "morning-briefing", {
       env: env("dev"),
       dependencies,
@@ -65,7 +67,7 @@ describe("handleCronRequest", () => {
     const delivery = vi.fn<BriefingDelivery>().mockRejectedValue(new Error("boom"));
     const response = await handleCronRequest(request(`Bearer ${SECRET}`), "morning-briefing", {
       env: env("prod"),
-      dependencies: () => ({ ...createBriefingDependencies(env("dev")()), delivery }),
+      dependencies: () => ({ providers: { calendar: {}, weather: {}, news: {} }, delivery }),
     });
     expect(response.status).toBe(502);
     expect(delivery).toHaveBeenCalledTimes(1);

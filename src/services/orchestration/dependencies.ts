@@ -6,6 +6,8 @@ import {
 } from "@/services/providers/calendar/google-calendar.provider";
 import type { ProviderRegistry } from "@/types/briefing";
 import { createResendDelivery } from "@/services/delivery/resend-delivery";
+import { createOpenMeteoProvider } from "@/services/providers/weather/open-meteo.provider";
+import { withMetOfficeWarnings } from "@/services/providers/weather/met-office-warnings.provider";
 
 /**
  * Production wiring of providers and delivery. A provider is registered only
@@ -14,6 +16,7 @@ import { createResendDelivery } from "@/services/delivery/resend-delivery";
  */
 export function createBriefingDependencies(env: ServerEnv): OrchestratorDependencies {
   const providers: ProviderRegistry = { calendar: {}, weather: {}, news: {} };
+  providers.weather["open-meteo"] = withMetOfficeWarnings(createOpenMeteoProvider());
 
   const googleCalendar = googleCalendarConfigFrom(env);
   if (googleCalendar) providers.calendar["google-calendar"] = createGoogleCalendarProvider(googleCalendar);

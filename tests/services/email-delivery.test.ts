@@ -33,6 +33,62 @@ function model(): BriefingModel {
 const request = (): DeliveryRequest => ({ briefing: model(), template: "morning-briefing", subject: "Morning briefing" });
 
 describe("email renderer", () => {
+  it("adds matching emojis to every section heading in HTML and plain text", () => {
+    const briefing = model();
+    briefing.sections.push({
+      id: "markets", kind: "markets", title: "Markets",
+      outcome: { status: "unavailable", reason: "Not configured" },
+    });
+    const { html, text } = renderBriefingEmail(briefing, "morning-briefing");
+    for (const title of [
+      "📅 Today's Calendar", "🌤️ Weather", "📰 Worldwide Tech and AI",
+      "📰 UK Politics and Finance", "📰 Global Affairs", "💰 Markets",
+    ]) {
+      expect(text).toContain(`${title}\n`);
+      expect(html).toContain(`${title.replace("'", "&#39;")}</h2>`);
+    }
+  });
+
+  it("consolidates required weather attribution in the footer outside the section cards", () => {
+    const briefing = model();
+    briefing.sections[1] = {
+      id: "weather", title: "Weather", kind: "weather", outcome: {
+        status: "ok", data: ["Wheatley", "Lower Earley"].map((locationName) => ({
+          locationId: locationName, locationName, date: "2026-07-01", summary: "Clear",
+          temperatureMinC: 10, temperatureMaxC: 20,
+          attribution: {
+            name: "Open-Meteo", url: "https://open-meteo.com/",
+            licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
+          },
+        })),
+      },
+    };
+    const rendered = renderBriefingEmail(briefing, "morning-briefing");
+    for (const output of [rendered.html, rendered.text]) {
+      expect(output.match(/Weather: Open-Meteo/g)).toHaveLength(1);
+      expect(output.match(/CC BY 4.0/g)).toHaveLength(1);
+      expect(output).not.toContain("weather data by");
+      expect(output.indexOf("Weather: Open-Meteo")).toBeGreaterThan(output.indexOf("Lower Earley: Clear"));
+      expect(output.indexOf("Weather: Open-Meteo")).toBeGreaterThan(output.indexOf("Global Affairs"));
+      expect(output).toContain("https://open-meteo.com/");
+      expect(output).toContain("https://creativecommons.org/licenses/by/4.0/");
+    }
+  });
+
+  it("uses email-compatible layout, responsive sizing and system dark mode without scripts or remote assets", () => {
+    const { html, text } = renderBriefingEmail(model(), "morning-briefing");
+    expect(html).toContain('<meta name="color-scheme" content="light dark">');
+    expect(html).toContain('<meta name="supported-color-schemes" content="light dark">');
+    expect(html).toContain("@media (prefers-color-scheme: dark)");
+    expect(html).toContain("@media only screen and (max-width: 620px)");
+    expect(html).toContain('role="presentation"');
+    expect(html).toContain("max-width:640px");
+    expect(html).toContain("<!--[if mso]>");
+    expect(html).toContain("background-color:#ffffff");
+    expect(html).not.toMatch(/<script|<iframe|<img|@import|<link /);
+    expect(text).not.toContain("<table");
+  });
+
   it("renders both formats in section order with UK times and escaped text", () => {
     const rendered = renderBriefingEmail(model(), "morning-briefing");
     expect(rendered.text).toContain("All day: Office");
@@ -71,7 +127,7 @@ describe("email renderer", () => {
     ] } };
     const rendered = renderBriefingEmail(briefing, "morning-briefing");
     expect(rendered.html).toContain('href="https://example.com/?a=1&amp;b=2"');
-    expect(rendered.text).toContain("Publisher, 30 Jun, 05:00 (older than 24 hours)");
+    expect(rendered.text).toContain("Source: Publisher | Published: 30 Jun, 05:00 (older than 24 hours)");
   });
 
   it("rejects unknown templates", () => {
@@ -94,6 +150,11 @@ describe("email renderer", () => {
     const rendered = renderBriefingEmail(briefing, "morning-briefing");
     expect(rendered.text).toContain("2026-06-30 to 2026-07-03, end exclusive");
     expect(rendered.text).toContain("Wheatley: Clear; 0-10 C; precipitation probability up to 0%; wind up to 0 km/h");
+    expect(rendered.html).toContain(">Wheatley</h3>");
+    expect(rendered.html).toContain("Temperature 0–10 °C");
+    expect(rendered.html).toContain("Precipitation up to 0%");
+    expect(rendered.html).toContain("Wind up to 0 km/h");
+    expect(rendered.html.indexOf(">Wheatley</h3>")).toBeLessThan(rendered.html.indexOf("border-radius:10px"));
   });
 
   it("displays winter times without the summer offset", () => {

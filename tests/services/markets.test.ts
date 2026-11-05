@@ -47,7 +47,7 @@ async function run(markets?: MarketsProvider) {
     providers: {
       calendar: { "google-calendar": async () => [] },
       weather: { "open-meteo": async () => [] },
-      news: { rss: async () => [] },
+      news: { gnews: async () => [] },
       markets: markets ? { "mock-markets": markets } : {},
     },
   });
@@ -185,6 +185,25 @@ describe("market foundation", () => {
 });
 
 describe("market rendering", () => {
+  it("colours crypto gains green and losses red, keeping zero and missing changes neutral", () => {
+    const asset = snapshot("bitcoin");
+    if (asset.status !== "ok") throw new Error("Invalid fixture");
+    const { html, text } = renderBriefingEmail(model([
+      { ...asset, change: { percent: 2.5, basis: "24-hours" } },
+      { ...asset, assetId: "ethereum", change: { percent: -1.25, basis: "24-hours" } },
+      { ...asset, assetId: "xrp", change: { percent: 0, basis: "24-hours" } },
+      { ...asset, assetId: "nvda", change: undefined },
+    ]), "morning-briefing");
+    expect(html).toMatch(/class="change-positive rule"[^>]*color:#137347[^>]*>\+2\.50% over 24 hours/);
+    expect(html).toMatch(/class="change-negative rule"[^>]*color:#b42332[^>]*>-1\.25% over 24 hours/);
+    expect(html).toMatch(/class="copy rule"[^>]*>0\.00% over 24 hours/);
+    expect(html).toMatch(/class="copy rule"[^>]*>change unavailable/);
+    expect(html).toContain(".change-positive { color: #75dfa7 !important; }");
+    expect(html).toContain(".change-negative { color: #ff9aa5 !important; }");
+    expect(text).toContain("+2.50% over 24 hours");
+    expect(text).toContain("-1.25% over 24 hours");
+  });
+
   it("renders currency, precision, zero/positive/negative changes, timestamps and stale labels", () => {
     const stock = snapshot("nvda");
     const crypto = snapshot("bitcoin");
@@ -201,14 +220,21 @@ describe("market rendering", () => {
       expect(output).toContain("USD");
       expect(output).toContain("GBP");
       expect(output).toContain("1.2345");
-      expect(output).toMatch(/XRP \(XRP\/USD\): USD\s*1\.2345/);
       expect(output).toContain("0.00% vs previous close");
       expect(output).toContain("-2.14% vs previous close");
       expect(output).toContain("+1.32% over 24 hours");
       expect(output).toContain("closing price as of 30 Jun 2026, 21:00");
       expect(output).toContain("last trade as of 30 Jun 2026, 21:00 (stale)");
-      expect(output).toContain("Source: Mock source");
+      expect(output).not.toContain("Source: Mock source");
+      expect(output).not.toContain("https://example.com/markets");
     }
+    expect(rendered.text).toMatch(/XRP \(XRP\/USD\): USD\s*1\.2345/);
+    expect(rendered.html).toContain('aria-label="Market snapshots"');
+    expect(rendered.html).toContain('scope="col"');
+    expect(rendered.html).toContain('scope="row"');
+    expect(rendered.html).toContain(">Asset</th>");
+    expect(rendered.html).toContain(">Price</th>");
+    expect(rendered.html).toContain(">Change</th>");
     expect(rendered.text.indexOf("Stocks (USD)")).toBeLessThan(rendered.text.indexOf("Crypto (BTC/ETH in GBP; XRP in USD)"));
   });
 
@@ -237,15 +263,14 @@ describe("market rendering", () => {
       .toContain("Data unavailable: Awaiting provider permission");
   });
 
-  it("escapes source text and rejects unsafe source links", () => {
+  it("omits market source text and links while still rejecting unsafe metadata", () => {
     const asset = snapshot("nvda");
     if (asset.status !== "ok") throw new Error("Invalid fixture");
-    expect(renderBriefingEmail(model([
+    const rendered = renderBriefingEmail(model([
       { ...asset, source: { name: "<script>", url: "https://example.com/?a=1&b=2" } },
-    ]), "morning-briefing").html).toContain('href="https://example.com/?a=1&amp;b=2"');
-    expect(renderBriefingEmail(model([
-      { ...asset, source: { name: "<script>", url: "https://example.com" } },
-    ]), "morning-briefing").html).toContain("&lt;script&gt;");
+    ]), "morning-briefing");
+    expect(rendered.html).not.toContain("example.com");
+    expect(rendered.html).not.toContain("&lt;script&gt;");
     for (const url of ["javascript:alert(1)", "https://user:password@example.com"]) {
       expect(() => renderBriefingEmail(model([{ ...asset, source: { name: "Source", url } }]), "morning-briefing"))
         .toThrow(/link/);

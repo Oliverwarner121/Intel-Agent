@@ -26,9 +26,11 @@ Implemented:
 - GMT/BST-aware date utilities, bounded-retry JSON HTTP helper, structured
   logger and request-time environment validation.
 
-Not yet implemented: Resend email, Open-Meteo weather and news providers
-(Phases 3–5). Until then those sections report "not configured" and no email is
-sent. A provider whose credentials are missing is reported the same way.
+Phase 3 email rendering and Resend delivery are implemented and mock-tested,
+but not yet live-verified or deployed. Sending is disabled by default.
+Open-Meteo weather and news providers (Phases 4–5) are not yet implemented;
+their sections report unavailable. A provider whose credentials are missing
+is reported the same way.
 
 ## Local development
 
@@ -44,6 +46,51 @@ curl -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/mor
 Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 Only `APP_ENV=prod` may send email; `local` and `dev` always run as previews.
 Tests mock all external services and never send email.
+
+### Resend email setup
+
+The website domains are `intel-dev.oliverwarner.co.uk` (dev) and
+`intel.oliverwarner.co.uk` (prod). The separate sending domain is
+`intel-mail.oliverwarner.co.uk`.
+
+1. Verify the sending domain in Resend using its DNS records (Vercel DNS can
+   be configured through Resend's integration). Enable sending, not receiving.
+   Leave open/click tracking off.
+2. Create a Sending-access API key restricted to that domain and save it in a
+   password manager. Do not commit it or paste it into chat.
+3. Add these variables to `intel-agent-prod`, scoped to Vercel **Production**:
+
+   | Variable | Value |
+   | --- | --- |
+   | `RESEND_API_KEY` | Restricted key; mark Sensitive |
+   | `EMAIL_FROM` | `Intel-Agent <agent@intel-mail.oliverwarner.co.uk>` |
+   | `EMAIL_TO` | `oliver.warner121@gmail.com` |
+   | `EMAIL_SEND_ENABLED` | `false` until an explicitly approved send |
+
+   Dashboard values have no surrounding quotes. In `.env.local`, quote
+   `EMAIL_FROM` as shown in [.env.example](.env.example).
+4. Merge and validate dev's preview behaviour before promoting the same source
+   commit. Dev/local cannot send, even if the send switch is accidentally true.
+   They do not need a Resend key. The send switch being absent means disabled.
+5. Only after the owner's approval, set `EMAIL_SEND_ENABLED=true` in prod and
+   deploy through GitHub Actions. This enables manual **and scheduled** sends:
+   the daily Cron is not paused by this switch once true. Coordinate the
+   first test with the schedule, and check the inbox and spam folder.
+
+The sender does not need a mailbox, but receiving replies requires separate
+configuration. Calendar text is escaped and formatted in Europe/London; email
+contains both HTML and plain text and explicitly marks unavailable sections.
+Private email/calendar content passes through Resend and the recipient's email
+provider; do not log rendered messages or API credentials.
+
+Resend acceptance returns a message ID, not proof of inbox receipt. Failure
+returns a safe error and is never automatically retried, including timeouts,
+rate limits or ambiguous responses. Check Resend before considering another
+attempt. Delivery keys use briefing ID, UK reporting date and a recipient hash,
+not a run ID. Resend retains keys for 24 hours: repeated identical requests are
+deduplicated, but a changed payload with the same key may conflict. Never
+bypass that conflict with a new key. Without durable storage there is no
+exactly-once, catch-up or cross-deployment replay guarantee.
 
 ### Google Calendar setup
 

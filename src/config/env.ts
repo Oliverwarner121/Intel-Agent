@@ -13,6 +13,26 @@ const serverEnvSchema = z.object({
   GOOGLE_CLIENT_SECRET: optionalSecret,
   GOOGLE_REFRESH_TOKEN: optionalSecret,
   GOOGLE_CALENDAR_ID: optionalSecret,
+  RESEND_API_KEY: optionalSecret,
+  EMAIL_FROM: optionalSecret,
+  EMAIL_TO: optionalSecret,
+  EMAIL_SEND_ENABLED: z.enum(["true", "false"]).optional(),
+}).superRefine((env, context) => {
+  if (env.EMAIL_FROM && !/^Intel-Agent <[^<>\r\n]+>$/.test(env.EMAIL_FROM)) {
+    context.addIssue({ code: "custom", path: ["EMAIL_FROM"], message: "must use Intel-Agent <address>" });
+  }
+  const fromAddress = env.EMAIL_FROM?.match(/^Intel-Agent <([^<>]+)>$/)?.[1];
+  if (env.EMAIL_FROM && (!fromAddress || !z.email().safeParse(fromAddress).success)) {
+    context.addIssue({ code: "custom", path: ["EMAIL_FROM"], message: "must contain a valid email" });
+  }
+  if (env.EMAIL_TO && !z.email().safeParse(env.EMAIL_TO).success) {
+    context.addIssue({ code: "custom", path: ["EMAIL_TO"], message: "must be a valid email" });
+  }
+  if (env.EMAIL_SEND_ENABLED === "true") {
+    for (const key of ["RESEND_API_KEY", "EMAIL_FROM", "EMAIL_TO"] as const) {
+      if (!env[key]) context.addIssue({ code: "custom", path: [key], message: "required when sending is enabled" });
+    }
+  }
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

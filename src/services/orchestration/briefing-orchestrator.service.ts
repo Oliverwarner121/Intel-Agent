@@ -108,7 +108,14 @@ async function collectSection(
         const provider = providers.calendar[section.provider];
         if (!provider) return notConfigured(section);
         const period = localDayPeriod(context.now, context.timezone);
-        const data = await withTimeout((signal) => provider({ ...context, signal, period }), timeoutMs);
+        const response = await withTimeout((signal) => provider({ ...context, signal, period }), timeoutMs);
+        const data = Array.isArray(response) ? response : response.events;
+        if (!Array.isArray(response) && response.unavailableCalendars.length) {
+          return {
+            ...base, kind: "calendar",
+            outcome: { status: "partial", data, unavailableCalendars: response.unavailableCalendars },
+          };
+        }
         return { ...base, kind: "calendar", outcome: { status: "ok", data } };
       }
       case "weather": {
@@ -282,7 +289,10 @@ export function summariseRun(run: BriefingRunResult) {
                 ...(asset.status === "unavailable" ? { reason: asset.reason } : {}),
               })),
             }
-            : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
+            : section.kind === "calendar" && section.outcome.status === "partial"
+              ? { id: section.id, status: "partial" as const, items: section.outcome.data.length,
+                unavailableCalendars: section.outcome.unavailableCalendars.length }
+              : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
     ),
     delivery: run.delivery,
   };

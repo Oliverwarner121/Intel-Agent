@@ -37,6 +37,7 @@ interface EmailItem {
   changeTone?: "positive" | "negative";
   hours?: HourlyWeatherForecast[];
   weather?: { location: string; summary: string; pills: string[] };
+  calendar?: { text: string; name?: string; color?: string };
 }
 
 function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): EmailItem[] {
@@ -50,9 +51,16 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
     timeZone: briefing.timezone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   }).format(new Date(value));
   switch (section.kind) {
-    case "calendar":
-      if (!section.outcome.data.length) return [{ text: "No events scheduled today." }];
-      return section.outcome.data.map((event) => {
+    case "calendar": {
+      const failures = section.outcome.status === "partial"
+        ? section.outcome.unavailableCalendars.map((calendar) => ({
+          text: `${calendar.calendarName}: Calendar unavailable or incomplete: ${calendar.reason}`,
+        })) : [];
+      if (!section.outcome.data.length) return [
+        { text: failures.length ? "No events retrieved from the available calendars." : "No events scheduled today." },
+        ...failures,
+      ];
+      return [...section.outcome.data.map((event) => {
         const timing = event.timing;
         const label = timing.kind === "all-day"
           ? `All day${timing.startDate !== briefing.reportingDate || timing.endDate !== addDays(briefing.reportingDate, 1)
@@ -62,8 +70,13 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
             localDate(new Date(timing.end), briefing.timezone) !== briefing.reportingDate
               ? ` (${dateTime(timing.start)} to ${dateTime(timing.end)})` : ""
           }`;
-        return { text: `${label}: ${event.title}${event.location ? ` - ${event.location}` : ""}` };
-      });
+        const text = `${label}: ${event.title}${event.location ? ` - ${event.location}` : ""}`;
+        return {
+          text: `${text}${event.calendarName ? ` [${event.calendarName}]` : ""}`,
+          calendar: { text, name: event.calendarName, color: event.calendarColor },
+        };
+      }), ...failures];
+    }
     case "weather": {
       if (!section.outcome.data.length) return [{ text: "No forecast data available." }];
       const rows = section.outcome.data.flatMap((forecast) => {
@@ -254,6 +267,20 @@ ${item.hours?.length ? renderHourly(item.hours, timezone) : ""}
 </div>`;
 }
 
+function renderCalendarEvent(calendar: NonNullable<EmailItem["calendar"]>): string {
+  if (calendar.color !== undefined && !/^#[0-9a-f]{6}$/i.test(calendar.color)) {
+    throw new SafeError("Email contains an invalid calendar colour");
+  }
+  const background = calendar.color ?? "#657687";
+  const linear = (offset: number) => {
+    const channel = Number.parseInt(background.slice(offset, offset + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * linear(1) + 0.7152 * linear(3) + 0.0722 * linear(5);
+  const foreground = (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff";
+  return `<div${calendar.name ? ` title="${escape(calendar.name)}"` : ""} style="background-color:${background};color:${foreground};padding:12px 14px;border-radius:8px">${escape(calendar.text)}</div>`;
+}
+
 function renderItems(section: BriefingSectionResult, items: EmailItem[], timezone: string): string {
   if (section.kind === "markets" && items.some((item) => item.columns)) {
     const cell = "padding:12px 4px;border-bottom:1px solid #e8eef2;vertical-align:top;overflow-wrap:anywhere;line-height:1.6";
@@ -268,7 +295,7 @@ function renderItems(section: BriefingSectionResult, items: EmailItem[], timezon
     }).join("")}</tbody></table>`;
   }
   return `<table role="presentation" width="100%" style="width:100%">${items.map((item, index) =>
-    `<tr><td class="${item.compact ? "muted" : "copy"} rule${section.outcome.status === "unavailable" ? " notice" : ""}" style="padding:${index === 0 ? "0" : item.compact ? "4px" : "13px"} 0 ${index === items.length - 1 ? "0" : item.compact ? "4px" : "13px"};${index === items.length - 1 || item.compact ? "" : "border-bottom:1px solid #e8eef2;"}color:${section.outcome.status === "unavailable" ? "#8a5a17" : item.compact ? "#657687" : "#34495b"};font-size:${item.compact ? "11px" : "15px"};line-height:1.7;overflow-wrap:anywhere;word-break:break-word">${item.weather ? renderWeatherCard(item, timezone) : item.url ? `<a class="link" href="${escape(item.url)}" style="color:#08796d;text-decoration:underline">${escape(item.text)}</a>` : escape(item.text)}</td></tr>`
+    `<tr><td class="${item.compact ? "muted" : "copy"} rule${section.outcome.status === "unavailable" ? " notice" : ""}" style="padding:${index === 0 ? "0" : item.compact ? "4px" : "13px"} 0 ${index === items.length - 1 ? "0" : item.compact ? "4px" : "13px"};${index === items.length - 1 || item.compact ? "" : "border-bottom:1px solid #e8eef2;"}color:${section.outcome.status === "unavailable" ? "#8a5a17" : item.compact ? "#657687" : "#34495b"};font-size:${item.compact ? "11px" : "15px"};line-height:1.7;overflow-wrap:anywhere;word-break:break-word">${item.calendar ? renderCalendarEvent(item.calendar) : item.weather ? renderWeatherCard(item, timezone) : item.url ? `<a class="link" href="${escape(item.url)}" style="color:#08796d;text-decoration:underline">${escape(item.text)}</a>` : escape(item.text)}</td></tr>`
   ).join("")}</table>`;
 }
 

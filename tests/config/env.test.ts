@@ -23,6 +23,12 @@ describe("getServerEnv", () => {
 });
 
 describe("getServerEnv Google settings", () => {
+  it("accepts only explicit supported calendar selection modes", () => {
+    expect(getServerEnv({ CRON_SECRET: secret, GOOGLE_CALENDAR_MODE: "owned" }).GOOGLE_CALENDAR_MODE).toBe("owned");
+    expect(getServerEnv({ CRON_SECRET: secret, GOOGLE_CALENDAR_MODE: "single" }).GOOGLE_CALENDAR_MODE).toBe("single");
+    expect(() => getServerEnv({ CRON_SECRET: secret, GOOGLE_CALENDAR_MODE: "all" })).toThrow("GOOGLE_CALENDAR_MODE");
+  });
+
   it("treats blank optional values as unset", () => {
     expect(getServerEnv({ CRON_SECRET: secret, GOOGLE_CLIENT_ID: " ", GOOGLE_REFRESH_TOKEN: "token" })).toEqual({
       APP_ENV: "local",

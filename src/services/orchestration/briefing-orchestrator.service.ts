@@ -116,10 +116,10 @@ async function collectSection(
           timeoutMs,
         );
         const failures = data.filter((location) => "unavailableReason" in location);
-        if (failures.length === data.length && failures.length > 0) {
+        if (failures.length === data.length && failures.length > 0 && !data.some((location) => location.warnings?.status === "ok")) {
           return unavailable(section, failures.map((location) => `${location.locationName}: ${location.unavailableReason}`).join("; "));
         }
-        if (failures.length > 0) {
+        if (failures.length > 0 || data.some((location) => location.warnings?.status === "unavailable")) {
           return { ...base, kind: "weather", outcome: { status: "partial", data } };
         }
         return { ...base, kind: "weather", outcome: { status: "ok", data } };
@@ -240,8 +240,10 @@ export function summariseRun(run: BriefingRunResult) {
             id: section.id, status: section.outcome.status,
             items: section.outcome.data.filter((location) => !("unavailableReason" in location)).length,
             locations: section.outcome.data.map((location) => "unavailableReason" in location
-              ? { id: location.locationId, status: "unavailable" as const, reason: location.unavailableReason }
-              : { id: location.locationId, status: "ok" as const }),
+              ? { id: location.locationId, status: "unavailable" as const, reason: location.unavailableReason,
+                ...(location.warnings ? { warningsStatus: location.warnings.status } : {}) }
+              : { id: location.locationId, status: "ok" as const,
+                ...(location.warnings ? { warningsStatus: location.warnings.status } : {}) }),
           }
           : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
     ),

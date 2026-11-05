@@ -71,7 +71,8 @@ there is no daily geocoding. Verified on 5 November 2026 through the
 
 Locations are fetched concurrently in configured order, with a 6-second
 timeout per attempt, at most one transient retry and a 32 KiB response limit.
-Three daily calls normally suffice (up to six with retries). The provider
+Three daily forecast calls normally suffice (up to six with retries), plus
+two regional warning requests described below. The provider
 validates dates, units, array lengths, WMO codes and numeric ranges. Optional
 null measurements are labelled unavailable, not replaced by zero.
 
@@ -83,8 +84,46 @@ Public forecast values were live-validated through the actual provider for all
 three locations on 5 November 2026; this is not evidence of deployed weather
 or email rendering in an inbox.
 
-**Warnings:** this integration does not supply official severe-weather alerts;
-the email explicitly says so. Forecast conditions are not official warnings.
+### Met Office regional warnings
+
+The weather provider also reads the official
+[Met Office warning RSS feeds](https://weather.metoffice.gov.uk/guides/rss):
+
+| Feed region | Locations |
+| --- | --- |
+| London & South East England (`se`) | Wheatley (Oxford), Lower Earley |
+| South West England (`sw`) | Wotton-under-Edge |
+
+Two public requests are made per briefing, concurrently with forecasts, with
+6-second attempt timeouts, at most one transient retry and 128 KiB XML limits.
+No API key is needed. Feeds are allowlisted and XML/schema validated; documents
+with DTDs/entities, unexpected regions, invalid publication dates or non-Met
+Office warning links are rejected.
+
+These are **regional feed listings, not town-level or polygon matches**.
+The email preserves warning titles (including severity/hazard when provided),
+publication times and direct official links. All listed entries are shown,
+including warnings for future days; consult the linked warning for validity
+and affected areas. Titles are not rewritten and warning areas/times are not
+inferred by scraping the website. A region is displayed once per email, with
+an explicit note that its warning may not affect the exact location.
+
+A validated empty feed displays "No warnings listed in this regional feed"
+with its check time, not a blanket claim that the town is safe or warning-free.
+Feeds can lag official updates, and an email is a point-in-time snapshot.
+Failed or malformed retrieval displays "Warnings unavailable" and marks weather
+partial while retaining forecasts and any successful region. Successful warning
+listings survive forecast failures as well.
+
+The Met Office [RSS usage guidance](https://weather.metoffice.gov.uk/guides/rss)
+permits display with attribution and direct content links, subject to its
+[website terms](https://www.metoffice.gov.uk/policies/tandc). The email attributes
+the Met Office and includes the Open Government Licence v3.0 statement/link.
+This integration uses the published RSS feeds, not undocumented web services.
+Both live regional feeds were successfully parsed on 5 November 2026 and
+contained zero entries. Non-empty warning parsing/rendering is mock-tested,
+not yet live-verified. Official geographic boundaries are not supplied by this
+RSS integration.
 
 The free API permits this personal non-commercial use under the
 [Open-Meteo terms](https://open-meteo.com/en/terms) (fewer than 10,000 calls/day,

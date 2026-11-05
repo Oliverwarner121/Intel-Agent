@@ -93,7 +93,7 @@ describe("email renderer", () => {
     };
     const rendered = renderBriefingEmail(briefing, "morning-briefing");
     expect(rendered.text).toContain("2026-06-30 to 2026-07-03, end exclusive");
-    expect(rendered.text).toContain("Wheatley: Clear; 0-10 C; rain 0%; wind up to 0 km/h");
+    expect(rendered.text).toContain("Wheatley: Clear; 0-10 C; precipitation probability up to 0%; wind up to 0 km/h");
   });
 
   it("displays winter times without the summer offset", () => {

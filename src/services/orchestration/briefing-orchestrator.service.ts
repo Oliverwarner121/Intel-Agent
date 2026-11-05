@@ -115,6 +115,13 @@ async function collectSection(
           (signal) => provider({ ...context, signal, locationIds: section.locationIds }),
           timeoutMs,
         );
+        const failures = data.filter((location) => "unavailableReason" in location);
+        if (failures.length === data.length && failures.length > 0) {
+          return unavailable(section, failures.map((location) => `${location.locationName}: ${location.unavailableReason}`).join("; "));
+        }
+        if (failures.length > 0) {
+          return { ...base, kind: "weather", outcome: { status: "partial", data } };
+        }
         return { ...base, kind: "weather", outcome: { status: "ok", data } };
       }
       case "news": {
@@ -189,7 +196,7 @@ export async function runBriefing(
     generatedAt: now.toISOString(),
     sections,
   };
-  const hasGaps = sections.some((section) => section.outcome.status === "unavailable");
+  const hasGaps = sections.some((section) => section.outcome.status !== "ok");
 
   let delivery: DeliveryOutcome;
   if (mode === "preview") {
@@ -226,9 +233,17 @@ export function summariseRun(run: BriefingRunResult) {
     reportingDate: run.reportingDate,
     durationMs: run.durationMs,
     sections: (run.briefing?.sections ?? []).map((section) =>
-      section.outcome.status === "ok"
-        ? { id: section.id, status: "ok" as const, items: section.outcome.data.length }
-        : { id: section.id, status: "unavailable" as const, reason: section.outcome.reason },
+      section.outcome.status === "unavailable"
+        ? { id: section.id, status: "unavailable" as const, reason: section.outcome.reason }
+        : section.kind === "weather"
+          ? {
+            id: section.id, status: section.outcome.status,
+            items: section.outcome.data.filter((location) => !("unavailableReason" in location)).length,
+            locations: section.outcome.data.map((location) => "unavailableReason" in location
+              ? { id: location.locationId, status: "unavailable" as const, reason: location.unavailableReason }
+              : { id: location.locationId, status: "ok" as const }),
+          }
+          : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
     ),
     delivery: run.delivery,
   };

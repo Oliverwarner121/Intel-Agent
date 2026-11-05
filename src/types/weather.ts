@@ -8,8 +8,18 @@ export interface WeatherForecast {
   temperatureMaxC: number;
   precipitationProbabilityPercent?: number;
   windSpeedMaxKph?: number;
+  hourly?: HourlyWeatherForecast[];
+  hourlyUnavailableReason?: string;
   attribution?: { name: string; url: string; licenceUrl: string };
   warnings?: WeatherWarnings;
+}
+
+export interface HourlyWeatherForecast {
+  at: string;
+  summary: string;
+  emoji: string;
+  temperatureC: number;
+  precipitationProbabilityPercent?: number;
 }
 
 export interface UnavailableWeatherLocation {

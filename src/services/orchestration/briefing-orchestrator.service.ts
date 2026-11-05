@@ -108,7 +108,14 @@ async function collectSection(
         const provider = providers.calendar[section.provider];
         if (!provider) return notConfigured(section);
         const period = localDayPeriod(context.now, context.timezone);
-        const data = await withTimeout((signal) => provider({ ...context, signal, period }), timeoutMs);
+        const response = await withTimeout((signal) => provider({ ...context, signal, period }), timeoutMs);
+        const data = Array.isArray(response) ? response : response.events;
+        if (!Array.isArray(response) && response.unavailableCalendars.length) {
+          return {
+            ...base, kind: "calendar",
+            outcome: { status: "partial", data, unavailableCalendars: response.unavailableCalendars },
+          };
+        }
         return { ...base, kind: "calendar", outcome: { status: "ok", data } };
       }
       case "weather": {
@@ -122,7 +129,8 @@ async function collectSection(
         if (failures.length === data.length && failures.length > 0 && !data.some((location) => location.warnings?.status === "ok")) {
           return unavailable(section, failures.map((location) => `${location.locationName}: ${location.unavailableReason}`).join("; "));
         }
-        if (failures.length > 0 || data.some((location) => location.warnings?.status === "unavailable")) {
+        if (failures.length > 0 || data.some((location) => location.warnings?.status === "unavailable" ||
+          (!("unavailableReason" in location) && location.hourlyUnavailableReason))) {
           return { ...base, kind: "weather", outcome: { status: "partial", data } };
         }
         return { ...base, kind: "weather", outcome: { status: "ok", data } };
@@ -130,7 +138,7 @@ async function collectSection(
       case "news": {
         const provider = providers.news[section.provider];
         if (!provider) return notConfigured(section);
-        const data = await withTimeout(
+        const response = await withTimeout(
           (signal) =>
             provider({
               ...context,
@@ -144,7 +152,11 @@ async function collectSection(
         return {
           ...base,
           kind: "news",
-          outcome: { status: "ok", data: data.slice(0, section.maxStories) },
+          outcome: {
+            status: "ok",
+            data: (Array.isArray(response) ? response : response.stories).slice(0, section.maxStories),
+            ...(!Array.isArray(response) && response.notice ? { notice: response.notice } : {}),
+          },
         };
       }
       case "markets": {
@@ -281,7 +293,10 @@ export function summariseRun(run: BriefingRunResult) {
                 ...(asset.status === "unavailable" ? { reason: asset.reason } : {}),
               })),
             }
-            : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
+            : section.kind === "calendar" && section.outcome.status === "partial"
+              ? { id: section.id, status: "partial" as const, items: section.outcome.data.length,
+                unavailableCalendars: section.outcome.unavailableCalendars.length }
+              : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
     ),
     delivery: run.delivery,
   };

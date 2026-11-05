@@ -3,6 +3,7 @@ import { weatherLocations } from "@/config/weather-locations";
 import { fetchJson, HttpError } from "@/lib/http";
 import { SafeError, type WeatherProvider } from "@/types/briefing";
 import type { WeatherForecast, WeatherLocationResult } from "@/types/weather";
+import { addDays, startOfLocalDay } from "@/lib/date";
 
 const conditions: Readonly<Record<number, string>> = {
   0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -32,7 +33,65 @@ const responseSchema = z.object({
     precipitation_probability_max: z.array(z.number().min(0).max(100).nullable()).length(1),
     wind_speed_10m_max: z.array(z.number().min(0).finite().nullable()).length(1),
   }),
+  hourly: z.unknown().optional(),
+  hourly_units: z.unknown().optional(),
 });
+
+const hourlySchema = z.object({
+  time: z.array(z.string()).min(23).max(25),
+  temperature_2m: z.array(z.number().finite()).min(23).max(25),
+  weather_code: z.array(z.int().refine((code) => conditions[code] !== undefined)).min(23).max(25),
+  precipitation_probability: z.array(z.number().min(0).max(100).nullable()).min(23).max(25),
+});
+const hourlyUnitsSchema = z.object({
+  time: z.literal("iso8601"), temperature_2m: z.literal("\u00b0C"),
+  weather_code: z.literal("wmo code"), precipitation_probability: z.literal("%"),
+});
+
+function weatherEmoji(code: number): string {
+  if (code === 0) return "☀️";
+  if (code === 1 || code === 2) return "🌤️";
+  if (code === 3) return "☁️";
+  if (code === 45 || code === 48) return "🌫️";
+  if (code >= 95) return "⛈️";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "🌨️";
+  return "🌧️";
+}
+
+function addHourly(forecast: WeatherForecast, response: z.infer<typeof responseSchema>, date: string) {
+  const parsed = hourlySchema.safeParse(response.hourly);
+  const units = hourlyUnitsSchema.safeParse(response.hourly_units);
+  const start = startOfLocalDay(date, "Europe/London").getTime();
+  const end = startOfLocalDay(addDays(date, 1), "Europe/London").getTime();
+  const count = (end - start) / 3_600_000;
+  if (!parsed.success || !units.success ||
+    Object.values(parsed.data).some((values) => values.length !== count)) {
+    forecast.hourlyUnavailableReason = "Hourly forecast has invalid units, values or day coverage";
+    return;
+  }
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
+  const hourly = parsed.data;
+  const hours = [];
+  for (let index = 0; index < count; index++) {
+    const instant = new Date(start + index * 3_600_000);
+    const code = hourly.weather_code[index];
+    const temperatureC = hourly.temperature_2m[index];
+    const summary = code === undefined ? undefined : conditions[code];
+    if (hourly.time[index] !== `${date}T${clock.format(instant)}` ||
+      code === undefined || temperatureC === undefined || !summary) {
+      forecast.hourlyUnavailableReason = "Hourly forecast does not match the London reporting day";
+      return;
+    }
+    const probability = hourly.precipitation_probability[index];
+    hours.push({
+      at: instant.toISOString(), summary, emoji: weatherEmoji(code), temperatureC,
+      ...(probability === null || probability === undefined ? {} : { precipitationProbabilityPercent: probability }),
+    });
+  }
+  forecast.hourly = hours;
+}
 
 export function createOpenMeteoProvider(fetchImpl?: typeof fetch): WeatherProvider {
   return async ({ locationIds, reportingDate, timezone, signal }) => {
@@ -52,6 +111,7 @@ export function createOpenMeteoProvider(fetchImpl?: typeof fetch): WeatherProvid
         const params = new URLSearchParams({
           latitude: String(location.latitude), longitude: String(location.longitude),
           daily: "weather_code,temperature_2m_min,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max",
+          hourly: "temperature_2m,weather_code,precipitation_probability",
           timezone, start_date: reportingDate, end_date: reportingDate,
           temperature_unit: "celsius", wind_speed_unit: "kmh",
         });
@@ -80,6 +140,7 @@ export function createOpenMeteoProvider(fetchImpl?: typeof fetch): WeatherProvid
         const wind = daily.wind_speed_10m_max[0];
         if (precipitation !== null && precipitation !== undefined) forecast.precipitationProbabilityPercent = precipitation;
         if (wind !== null && wind !== undefined) forecast.windSpeedMaxKph = wind;
+        addHourly(forecast, response, reportingDate);
         return forecast;
       } catch (error) {
         return {

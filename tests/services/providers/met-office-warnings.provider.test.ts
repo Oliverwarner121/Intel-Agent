@@ -113,7 +113,7 @@ describe("regional warning collection", () => {
   it("renders each region once with scope, attribution and direct warning links", async () => {
     const run = await runBriefing("morning-briefing", "preview", {
       now: () => context.now, providers: {
-        calendar: { "google-calendar": async () => [] }, news: { rss: async () => [] },
+        calendar: { "google-calendar": async () => [] }, news: { gnews: async () => [] },
         weather: { "open-meteo": withMetOfficeWarnings(forecasts, fetchFeeds(warning)) },
       },
     });
@@ -128,6 +128,24 @@ describe("regional warning collection", () => {
     expect(text).toContain("Open Government Licence v3.0");
     expect(html).toContain('href="https://www.metoffice.gov.uk/weather/warnings-and-advice/uk-warnings#example"');
     expect(html).not.toContain("Official weather warnings are not supplied");
+  });
+
+  it("combines empty regional listings without dropping either region", async () => {
+    const run = await runBriefing("morning-briefing", "preview", {
+      now: () => context.now, providers: {
+        calendar: {}, news: {},
+        weather: { "open-meteo": withMetOfficeWarnings(forecasts, fetchFeeds()) },
+      },
+    });
+    if (!run.briefing) throw new Error("Missing briefing");
+    const rendered = renderBriefingEmail(run.briefing, "morning-briefing");
+    for (const output of [rendered.html, rendered.text]) {
+      expect(output.match(/Met Office regional warnings/g)).toHaveLength(1);
+      expect(output.match(/No warnings listed/g)).toHaveLength(1);
+      expect(output).toContain("South West England");
+      expect(output).toContain(output === rendered.html ? "London &amp; South East England" : "London & South East England");
+      expect(output).toContain("when checked");
+    }
   });
 
   it("marks warning failure partial and keeps forecasts visible", async () => {

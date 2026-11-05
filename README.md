@@ -6,7 +6,8 @@ Daily agent emails you desired information for the day
 Phase 1 (foundation) is deployed to `intel-agent-dev` and `intel-agent-prod`.
 Phase 2 (Google Calendar) is implemented and verified against a live calendar.
 V1 will deliver a morning email with calendar data, weather and selected news
-headlines with source links. It will not use an LLM or generated summaries.
+headlines, short publisher-provided description excerpts and source links.
+It will not use an LLM or generated summaries.
 
 Implemented:
 
@@ -31,8 +32,10 @@ the owner confirmed receipt and layout of the first manually triggered email
 on 5 November 2026. Production sending is enabled; scheduled receipt is not yet
 verified. Code defaults to sending disabled in new environments.
 Phase 4 Open-Meteo weather is implemented, mock-tested and live-verified locally
-for all three locations, but not yet deployed. News (Phase 5) is not implemented
-and reports unavailable. Missing provider credentials also report unavailable.
+for all three locations, but not yet deployed. GNews (Phase 5) is implemented
+and mock-tested on this branch, with all three categories live-verified locally
+on 5 November 2026; it is not yet deployed.
+Missing provider credentials report unavailable.
 
 ## Local development
 
@@ -48,6 +51,144 @@ curl -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/mor
 Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 Only `APP_ENV=prod` may send email; `local` and `dev` always run as previews.
 Tests mock all external services and never send email.
+
+### Local email preview
+
+Run `npm run email:preview` to fetch today's real Calendar, weather, configured
+GNews and enabled markets and render the same HTML/plain-text email used by delivery. It loads
+`.env.local`, forces `APP_ENV=local` and disables sending regardless of your
+saved email settings. Markets is included automatically when a Twelve Data key
+is present unless `MARKETS_ENABLED=false` is explicitly set.
+
+Open `.intel-agent-preview/morning-briefing.html` in your browser or a trusted
+local HTML preview extension. A plain-text version is saved beside it. These
+files contain private calendar information: they are Git-ignored, outside
+`public/`, and written with owner-only permissions. Do not upload them to online
+preview services. Delete the two files when finished. Running again overwrites
+the preview; provider gaps are shown as unavailable, just as in an email.
+
+Each run consumes eight market credits; wait at least a minute between runs.
+When GNews is configured, each preview also consumes three GNews requests.
+No development server, Cron request, deployment or email send is involved.
+Browser rendering is a layout preview, not proof of compatibility with every
+email client. Today's data differs from tomorrow's scheduled snapshot.
+
+The shared renderer uses a responsive, table-based email layout with inline
+light-theme defaults, system fonts and section cards. Supporting clients and
+the browser preview follow system dark mode via `prefers-color-scheme`. Clients
+that strip styles may retain the light theme or apply their own colour inversion;
+dark-mode behaviour is not guaranteed across Gmail/Outlook versions. No remote
+fonts, images, tracking pixels or JavaScript are needed. Plain text is unchanged.
+
+### News (GNews)
+
+The three existing news sections use a replaceable function-based `NewsProvider`
+contract, not GNews DTOs. The server adapter maps metadata to `NewsStory`,
+deterministically ranks candidates and selects **up to three** distinct stories
+per category. Fewer are shown when there are not enough suitable candidates;
+there is no fabricated filler, LLM or invented explanation of why a story matters.
+At the owner's choice, emails display the headline, an optional publisher
+description excerpt (at most 280 characters), publisher, original publication
+time in `Europe/London` and the original article link. Descriptions are labelled
+**Publisher excerpt**, not summaries. Article bodies and images are not used,
+and source pages are never scraped or fetched.
+
+#### Configuration and permitted use
+
+1. [Register with GNews](https://gnews.io/register), verify your email and copy the
+   key from the [dashboard](https://gnews.io/dashboard).
+2. Set `GNEWS_API_KEY=` privately in `.env.local`; never paste the key into chat
+   or commit it. **Never** use a `NEXT_PUBLIC_` prefix.
+3. For deployment, add the same variable to the **Production** environment of
+   both `intel-agent-dev` and `intel-agent-prod` (both use Vercel Production
+   targets). Deploy/verify dev before an explicitly approved prod promotion.
+   Merely saving a Vercel variable does not update an existing deployment.
+
+No new dependency or paid plan is required. GNews' [pricing](https://gnews.io/pricing)
+and [terms](https://gnews.io/legal/terms-of-service) permit personal/non-commercial
+Free usage. This implementation is for a private briefing to the owner, not a
+commercial service or public republication. Publisher intellectual-property
+rights still apply; attribution is retained and API availability is not a
+general licence to republish full articles or images. Recheck terms before
+expanding recipients or changing the purpose.
+
+#### Requests and selection
+
+All three calls use `GET https://gnews.io/api/v4/search`. Authentication uses
+the documented **`X-Api-Key` header**, keeping secrets out of URLs and logs.
+`/top-headlines` is not used.
+
+| Category | `q` | Geography |
+| --- | --- | --- |
+| Worldwide Tech and AI | `AI OR "artificial intelligence" OR technology OR semiconductors OR cybersecurity OR "cloud computing" OR OpenAI OR Anthropic OR Nvidia` | Worldwide |
+| UK Politics and Finance | `(UK OR Britain OR British OR "Bank of England") AND (government OR parliament OR economy OR inflation OR budget OR taxation OR "interest rates" OR employment OR markets OR finance)` | `country=gb`, plus UK subject checks |
+| Global Affairs | `war OR diplomacy OR sanctions OR elections OR "global trade" OR "financial crisis" OR NATO OR "foreign policy" OR "international security" OR ceasefire OR tariffs OR "economic policy"` | Worldwide |
+
+Common parameters: `lang=en`, `max=10`, `in=title,description`,
+`sortby=relevance`, `nullable=description,image,content`, `truncate=content`.
+Queries remain within GNews' 200-character limit. `country=gb` refers to
+**publisher location**, not subject matter, so UK selection additionally requires
+UK context and relevant politics/finance terms in title/description. This can
+exclude a relevant story with no explicit UK context in its metadata.
+
+Normally **three requests per briefing**, one per category. Within a provider
+instance, requests are serialized with a 1.1-second pause after each completes
+before the next starts, to respect the
+[Free plan's one-request-per-second limit](https://docs.gnews.io/error-handling).
+Waiting respects cancellation; a failed/cancelled category does not block the
+others. This is not a distributed limiter: separate invocations or other apps
+using the same key can still cause 429 responses.
+There is no pagination, fallback request or automatic retry (including 429),
+so quota usage is bounded. Each request has a six-second timeout and 256 KiB
+response limit, respects section cancellation, rejects redirects and validates
+the response with Zod, including safe HTTP(S) links and timestamps. Identical
+category/window queries share the same promise within a provider instance;
+the bounded cache keeps at most one query per category. It is not persistent
+across invocations, previews or deployments and does not guarantee a daily cap.
+
+Selection removes canonical URL duplicates (tracking parameters/fragments
+ignored for comparison; original links retained), equivalent normalized
+headlines and conservatively overlapping headlines across publishers.
+Limited aliases group e.g. Bank of England/BoE and cuts/lowers rates; opposite
+decisions and different figures are kept separate. Relevance favours category
+terms in headlines over descriptions and adds importance-topic weights, with
+recency and stable lexical tie-breaks. Common low-impact sport/celebrity terms
+are filtered. These are transparent heuristics, not semantic understanding or
+an objective measure of importance: paraphrases can escape grouping, and similar
+events can still be grouped. Deduplication is within each category, not across
+the three sections. Only the ten API candidates can be ranked; coverage is not
+exhaustive and no publisher quality or factual verification guarantee is made.
+
+#### Free-plan delay and failures
+
+GNews Free currently allows **100 requests/day**, **10 articles/request**,
+**12-hour delayed results**, **30-day history** and truncated article content.
+The normal 24-hour briefing window requests `from=now-24h` through
+`to=now-12h`: only the accessible half of that window is available. The adapter
+never backfills older stories to reach three and filters returned articles to
+the requested boundaries. A shorter window with no accessible interval fails
+explicitly. A single compact footer note in both email formats states the
+12-hour delay, rather than a repeated paragraph in each section. Excerpts are
+labelled beside the text; these are **not live headlines** or generated summaries.
+The provider owns the plan-specific delay and can be changed when upgrading.
+
+Missing keys, invalid authentication (400/401), denied/unverified/quota access
+(403), rate limits (429), HTTP/network failures, malformed/oversized payloads
+and timeouts make **only that category unavailable**. The orchestrator preserves
+other news, Calendar, weather and markets and logs safe status/count summaries
+without API keys or raw payloads. Successful empty/irrelevant results are
+explicitly “No stories selected”, not a retrieval failure. A nonempty response
+entirely outside the reporting interval is unavailable, not a false empty success.
+The GNews dashboard is the source of quota usage/reset information.
+
+Implementation and mocked tests are complete. A local preview on 5 November
+2026 at 15:19 UTC successfully retrieved and selected three stories in each
+category after unattended requests were serialized with a post-response pause.
+The earlier concurrent calls caused 429s; 1.1-second start spacing alone still
+produced one 429 locally, so the pause now starts after the response completes.
+**Vercel configuration, deployment and inbox receipt remain unverified**.
+No real GNews calls or email sends are made by automated tests; the live check
+only wrote a private local preview and sent no email.
 
 ### Markets (Twelve Data)
 
@@ -105,7 +246,12 @@ the general plan-description text alone is not that permission. Twelve Data's
 [Basic plan](https://twelvedata.com/pricing) lists internal non-display usage. An
 attribution exemption or successful API request does not itself establish
 display rights. Reassess licensing before adding recipients, public display or
-commercial use. Source links credit Twelve Data beside each quote.
+commercial use. Source metadata is retained internally but omitted from the
+private email. HTML presents assets, prices and changes in a three-column table,
+with observation times and stale labels beneath each asset; plain text retains
+readable rows.
+Crypto changes use green for gains and red for losses, with dark-theme variants.
+Signs remain visible; zero and unavailable changes use neutral text.
 The public catalog confirmed `BTC/GBP`, `ETH/GBP` and `XRP/USD`; this does not
 prove account quote access. On 5 November 2026 at 13:19 UTC, an authorised local
 call through the actual adapter validated all eight quotes and their change
@@ -125,6 +271,25 @@ as `open-meteo`, and uses the briefing's London reporting date as both
 temperature in Celsius, maximum precipitation probability and maximum wind
 speed in km/h. Precipitation probability is not a prediction of rainfall amount
 and includes precipitation other than rain.
+
+Each location also includes today's complete hourly temperature, WMO conditions
+and precipitation probability, fetched in the same request. The email displays
+six daytime highlights (06:00, 09:00, 12:00, 15:00, 18:00 and 21:00 London time)
+in a compact card for each location, with weather emoji and accessible text
+alternatives. Location headings sit above each card; daily temperature range,
+maximum precipitation probability and maximum wind appear as wrapping pills
+inside it. Hourly icons include text
+alternatives, plus hot (30 C or
+above) and freezing (0 C or below) labels. These thresholds are presentation
+labels, not official warnings. Full hourly data is retrieved and validated but
+only these six times are displayed to keep mobile emails concise. HTML rounds
+temperatures to whole degrees; plain text retains provider precision.
+This is forecast data, not verified historical observations.
+Only the London reporting day is included. Hour counts and ordering are checked
+against consecutive local midnights (23/24/25 hours); selection uses London local
+times across GMT/BST changes. Invalid/missing hourly data preserves daily summaries but marks
+weather partial and shows hourly data unavailable. No additional API calls,
+remote icons or JavaScript are needed.
 
 Coordinates are fixed in [weather-locations.ts](src/config/weather-locations.ts);
 there is no daily geocoding. Verified on 5 November 2026 through the
@@ -169,6 +334,8 @@ with DTDs/entities, unexpected regions, invalid publication dates or non-Met
 Office warning links are rejected.
 
 These are **regional feed listings, not town-level or polygon matches**.
+Empty listings checked at the same instant are combined into one message naming
+both regions; active warnings and retrieval failures remain region-specific.
 The email preserves warning titles (including severity/hazard when provided),
 publication times and direct official links. All listed entries are shown,
 including warnings for future days; consult the linked warning for validity
@@ -196,7 +363,7 @@ RSS integration.
 The free API permits this personal non-commercial use under the
 [Open-Meteo terms](https://open-meteo.com/en/terms) (fewer than 10,000 calls/day,
 5,000/hour and 600/minute; shared Vercel IPs can hit limits sooner).
-Weather rows include [Open-Meteo attribution](https://open-meteo.com/), the
+The email footer includes one compact [Open-Meteo attribution](https://open-meteo.com/) per source, the
 [CC BY 4.0 licence](https://creativecommons.org/licenses/by/4.0/) and a note
 that daily codes were converted to condition text. Commercial use would require
 reviewing the provider's paid plans first.
@@ -254,6 +421,51 @@ bypass that conflict with a new key. Without durable storage there is no
 exactly-once, catch-up or cross-deployment replay guarantee.
 
 ### Google Calendar setup
+
+#### Include all calendars you own
+
+On the existing connected Google account, set `GOOGLE_CALENDAR_MODE=owned` in
+`.env.local`. No additional calendar IDs or credentials are required.
+`single` (the default) preserves existing behaviour: `GOOGLE_CALENDAR_ID` or
+`primary`. Owned mode ignores that ID and discovers entries with API
+`accessRole=owner`, including hidden entries; shared/read-only/public calendars
+and deleted entries are excluded. The Google UI's calendar grouping does not
+prove API ownership; special Birthdays/Family calendars may not qualify.
+UK Holidays is not included in this mode.
+
+The existing `calendar.readonly` OAuth scope permits discovery and event reading;
+reauthorisation is only needed if the existing token lacks that scope or fails.
+Refresh the local email preview to verify. HTML events use a full coloured row background
+from Google's calendar `backgroundColor` instead of repeated calendar names;
+names remain in hover titles and the plain-text version. Missing colours use a
+neutral background. Text uses whichever of black or white gives the higher WCAG
+contrast against that colour, independently of the email's light/dark theme. Individual
+event colour overrides are not used. Colours require no extra API call or scope
+in owned mode; single-calendar mode retains a neutral background.
+All-day events remain first and timed events are merged chronologically
+in London time. Duplicate IDs within a calendar are removed, while identical
+events in different calendars remain separate and labelled (they may be genuine
+separate appointments). Event IDs are scoped to their calendar.
+
+One token refresh is shared by the run, then owned calendars are queried
+concurrently. Limits are 20 owned calendars, two discovery pages of 250 entries
+and four event pages of 250 per calendar. Discovery requests have three-second
+timeouts and no retries; token refresh has four seconds and no retry; each
+calendar has a 6.5-second total retrieval budget with three-second attempts and
+one transient retry. Payloads are capped at 512 KiB. Pagination exhaustion is
+explicitly incomplete, never a successful truncated day.
+
+Independent failures retain retrieved events and mark Calendar partial, with
+incomplete calendar names/reasons shown only in the private email. Safe run
+summaries expose counts, not calendar names, IDs or event contents. An empty
+successful calendar differs from unavailable retrieval; if discovery or every
+calendar fails, Calendar is unavailable. Successful sections still survive.
+
+This feature is mock-tested, not yet live-verified or deployed. After approval,
+set `GOOGLE_CALENDAR_MODE=owned` on dev first, deploy/test, then enable prod and
+promote through the usual pipeline. No change to scheduling or sending guards.
+
+#### Initial account authorisation
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a
    project and enable the **Google Calendar API**.

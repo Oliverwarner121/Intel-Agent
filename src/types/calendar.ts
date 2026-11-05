@@ -8,4 +8,16 @@ export interface CalendarEvent {
   title: string;
   timing: CalendarEventTiming;
   location?: string;
+  calendarName?: string;
+  calendarColor?: string;
+}
+
+export interface CalendarRetrievalFailure {
+  calendarName: string;
+  reason: string;
+}
+
+export interface CalendarCollection {
+  events: CalendarEvent[];
+  unavailableCalendars: CalendarRetrievalFailure[];
 }

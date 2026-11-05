@@ -308,6 +308,51 @@ exactly-once, catch-up or cross-deployment replay guarantee.
 
 ### Google Calendar setup
 
+#### Include all calendars you own
+
+On the existing connected Google account, set `GOOGLE_CALENDAR_MODE=owned` in
+`.env.local`. No additional calendar IDs or credentials are required.
+`single` (the default) preserves existing behaviour: `GOOGLE_CALENDAR_ID` or
+`primary`. Owned mode ignores that ID and discovers entries with API
+`accessRole=owner`, including hidden entries; shared/read-only/public calendars
+and deleted entries are excluded. The Google UI's calendar grouping does not
+prove API ownership; special Birthdays/Family calendars may not qualify.
+UK Holidays is not included in this mode.
+
+The existing `calendar.readonly` OAuth scope permits discovery and event reading;
+reauthorisation is only needed if the existing token lacks that scope or fails.
+Refresh the local email preview to verify. HTML events use a full coloured row background
+from Google's calendar `backgroundColor` instead of repeated calendar names;
+names remain in hover titles and the plain-text version. Missing colours use a
+neutral background. Text uses whichever of black or white gives the higher WCAG
+contrast against that colour, independently of the email's light/dark theme. Individual
+event colour overrides are not used. Colours require no extra API call or scope
+in owned mode; single-calendar mode retains a neutral background.
+All-day events remain first and timed events are merged chronologically
+in London time. Duplicate IDs within a calendar are removed, while identical
+events in different calendars remain separate and labelled (they may be genuine
+separate appointments). Event IDs are scoped to their calendar.
+
+One token refresh is shared by the run, then owned calendars are queried
+concurrently. Limits are 20 owned calendars, two discovery pages of 250 entries
+and four event pages of 250 per calendar. Discovery requests have three-second
+timeouts and no retries; token refresh has four seconds and no retry; each
+calendar has a 6.5-second total retrieval budget with three-second attempts and
+one transient retry. Payloads are capped at 512 KiB. Pagination exhaustion is
+explicitly incomplete, never a successful truncated day.
+
+Independent failures retain retrieved events and mark Calendar partial, with
+incomplete calendar names/reasons shown only in the private email. Safe run
+summaries expose counts, not calendar names, IDs or event contents. An empty
+successful calendar differs from unavailable retrieval; if discovery or every
+calendar fails, Calendar is unavailable. Successful sections still survive.
+
+This feature is mock-tested, not yet live-verified or deployed. After approval,
+set `GOOGLE_CALENDAR_MODE=owned` on dev first, deploy/test, then enable prod and
+promote through the usual pipeline. No change to scheduling or sending guards.
+
+#### Initial account authorisation
+
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a
    project and enable the **Google Calendar API**.
 2. Under **Google Auth Platform**, configure the consent screen with audience

@@ -1,6 +1,6 @@
 import type { SectionKind } from "@/briefings/briefing.types";
 import type { LocalDayPeriod, ReportingPeriod } from "@/lib/date";
-import type { CalendarEvent } from "@/types/calendar";
+import type { CalendarCollection, CalendarEvent, CalendarRetrievalFailure } from "@/types/calendar";
 import type { NewsCategory, NewsStory } from "@/types/news";
 import type { WeatherLocationResult } from "@/types/weather";
 import type { MarketAssetId, MarketAssetResult } from "@/types/markets";
@@ -16,6 +16,9 @@ export interface SectionDataByKind {
 export type SectionOutcome<K extends SectionKind> =
   | { status: "ok"; data: SectionDataByKind[K] }
   | { status: "unavailable"; reason: string }
+  | (K extends "calendar" ? {
+    status: "partial"; data: CalendarEvent[]; unavailableCalendars: CalendarRetrievalFailure[];
+  } : never)
   | (K extends "weather" | "markets" ? { status: "partial"; data: SectionDataByKind[K] } : never);
 
 export type BriefingSectionResult = {
@@ -41,7 +44,7 @@ export interface ProviderContext {
 
 export type CalendarProvider = (
   request: ProviderContext & { period: LocalDayPeriod },
-) => Promise<CalendarEvent[]>;
+) => Promise<CalendarEvent[] | CalendarCollection>;
 
 export type WeatherProvider = (
   request: ProviderContext & { locationIds: string[] },

@@ -29,5 +29,20 @@ describe("getServerEnv Google settings", () => {
       CRON_SECRET: secret,
       GOOGLE_REFRESH_TOKEN: "token",
     });
+
+  });
+});
+
+describe("getServerEnv market settings", () => {
+  it("keeps markets disabled unless explicitly enabled", () => {
+    expect(getServerEnv({ CRON_SECRET: secret, TWELVE_DATA_API_KEY: " " }).TWELVE_DATA_API_KEY).toBeUndefined();
+    expect(getServerEnv({ CRON_SECRET: secret, TWELVE_DATA_API_KEY: " key " }).TWELVE_DATA_API_KEY).toBe("key");
+  });
+
+  it("requires a key when enabled and validates the switch without exposing values", () => {
+    expect(() => getServerEnv({ CRON_SECRET: secret, MARKETS_ENABLED: "true" })).toThrow("TWELVE_DATA_API_KEY");
+    expect(() => getServerEnv({ CRON_SECRET: secret, MARKETS_ENABLED: "yes" })).toThrow("MARKETS_ENABLED");
+    expect(getServerEnv({ CRON_SECRET: secret, MARKETS_ENABLED: "true", TWELVE_DATA_API_KEY: "key" }).MARKETS_ENABLED)
+      .toBe("true");
   });
 });

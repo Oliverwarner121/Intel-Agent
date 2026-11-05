@@ -49,6 +49,74 @@ Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 Only `APP_ENV=prod` may send email; `local` and `dev` always run as previews.
 Tests mock all external services and never send email.
 
+### Markets (Twelve Data)
+
+Provider-independent market models, a section contract, orchestration and HTML/
+plain-text rendering support Nvidia (`NVDA`), Apple (`AAPL`), Microsoft (`MSFT`),
+Amazon (`AMZN`), Alphabet (`GOOGL`), Bitcoin, Ethereum and XRP. Stocks display USD;
+Bitcoin and Ethereum display GBP; XRP displays USD because the official catalog
+had no `XRP/GBP` pair on 5 November 2026. The owner approved `XRP/USD` instead.
+The selected assets live in
+[market-assets.ts](src/config/market-assets.ts).
+
+The server-side Twelve Data adapter is implemented and mock-tested. Markets
+defaults to disabled, so existing scheduled emails are unchanged. When enabled,
+runtime wiring appends Markets after the original five sections without changing
+the schedule, delivery guard or delivery key.
+
+1. Obtain a free Basic API key from [Twelve Data](https://twelvedata.com/register).
+2. Save `TWELVE_DATA_API_KEY` privately in `.env.local` and the dev project's
+   server environment. Never use a `NEXT_PUBLIC_` variable or share the key.
+3. Set `MARKETS_ENABLED=true` in local/dev to include the section. Missing keys
+   fail configuration validation. A key alone does not enable the section.
+4. Keep production `MARKETS_ENABLED=false` or absent until an approved promotion.
+   Restart local development or redeploy dev after environment changes.
+
+Each run makes eight `/quote` requests concurrently with six-second timeouts,
+16 KiB response limits, no caching and **no automatic retries**. Each symbol
+costs one credit; all eight consume Basic's eight-credit minute allowance.
+Wait at least a minute before another manual preview and avoid other requests
+using the same key during that period. Rate-limit errors are explicitly
+unavailable, not bypassed. No WebSocket or paid features are used.
+
+Stocks request `eod=true`, daily quotes on `XNGS` (Nasdaq Global Select, verified
+for all five symbols in the official catalog), and display the latest
+completed closing price, not an index level or today's intraday quote. Percentage
+movement is computed from `close` and `previous_close`. Crypto requests daily
+quotes and uses `rolling_1d_change` for an actual rolling 24-hour movement;
+it does not relabel daily-candle movement as 24-hour change. Stock currency,
+MIC, all symbols, numeric fields and `last_quote_at` are validated. Missing
+last-quote timestamps make a quote unavailable; candle-opening `timestamp` is
+never presented as the price observation time. Source exchange names are shown.
+These are provider quotes, not a guaranteed consolidated exchange-wide feed.
+
+Snapshots carry source links, timestamps, closing-price/last-trade labels,
+explicit stale flags and optional changes labelled either versus the previous
+close or over 24 hours. Missing changes are unavailable, not zero. Asset failures
+preserve successful snapshots and mark the section partial; missing assets are
+reported unavailable. Summaries contain counts/statuses, not prices. Stocks
+older than seven days and crypto older than fifteen minutes are labelled stale;
+these are age thresholds, not a full exchange-holiday calendar. Weekend stock
+closes remain dated and are not represented as live prices.
+
+The owner confirmed provider permission for API retrieval and displaying these
+prices in a private daily email on Basic on 5 November 2026. Retain that approval;
+the general plan-description text alone is not that permission. Twelve Data's
+[Basic plan](https://twelvedata.com/pricing) lists internal non-display usage. An
+attribution exemption or successful API request does not itself establish
+display rights. Reassess licensing before adding recipients, public display or
+commercial use. Source links credit Twelve Data beside each quote.
+The public catalog confirmed `BTC/GBP`, `ETH/GBP` and `XRP/USD`; this does not
+prove account quote access. On 5 November 2026 at 13:19 UTC, an authorised local
+call through the actual adapter validated all eight quotes and their change
+fields using the owner's Basic key. Stocks returned the 4 November close
+(last-minute candle timestamp 20:59 UTC); crypto returned 5 November 13:19 UTC
+observations with rolling 24-hour changes. All passed the freshness thresholds.
+An initial stock check returned 404 with the general Nasdaq MIC `XNAS`; the
+catalog-confirmed `XNGS` filter resolved it. This is live adapter verification,
+not evidence of deployment or inbox rendering. No email was sent by the check.
+No paid subscription or production rollout is approved.
+
 ### Weather (Open-Meteo)
 
 No API key or extra environment variables are needed. The provider is registered

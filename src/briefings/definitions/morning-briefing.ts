@@ -1,6 +1,13 @@
 import type { z } from "zod";
 import type { briefingDefinitionSchema } from "@/briefings/briefing.types";
 import { LONDON_TIMEZONE } from "@/lib/date";
+import { marketAssetIds } from "@/types/markets";
+import type { SectionOfKind } from "@/briefings/briefing.types";
+
+export const morningMarketsSection = {
+  id: "markets", kind: "markets", title: "Markets", provider: "twelve-data",
+  assetIds: [...marketAssetIds],
+} satisfies SectionOfKind<"markets">;
 
 export const morningBriefing = {
   id: "morning-briefing",

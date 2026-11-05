@@ -4,6 +4,7 @@ import { getBriefingDefinition } from "@/briefings/registry";
 import { localDayPeriod, rollingPeriod } from "@/lib/date";
 import { HttpError } from "@/lib/http";
 import { logger } from "@/lib/logger";
+import { marketAssetResultSchema } from "@/types/markets";
 import {
   SafeError,
   type BriefingDelivery,
@@ -85,6 +86,8 @@ function unavailable(section: BriefingSection, reason: string): BriefingSectionR
       return { ...base, kind: "weather", outcome };
     case "news":
       return { ...base, kind: "news", outcome };
+    case "markets":
+      return { ...base, kind: "markets", outcome };
   }
 }
 
@@ -143,6 +146,30 @@ async function collectSection(
           kind: "news",
           outcome: { status: "ok", data: data.slice(0, section.maxStories) },
         };
+      }
+      case "markets": {
+        const provider = providers.markets?.[section.provider];
+        if (!provider) return notConfigured(section);
+        const response = await withTimeout(
+          (signal) => provider({ ...context, signal, assetIds: section.assetIds }),
+          timeoutMs,
+        );
+        const parsed = marketAssetResultSchema.array().safeParse(response);
+        if (!parsed.success) throw new SafeError("Market provider returned invalid data");
+        const results = parsed.data;
+        if (new Set(results.map((asset) => asset.assetId)).size !== results.length ||
+          results.some((asset) => !section.assetIds.includes(asset.assetId))) {
+          throw new SafeError("Market provider returned unexpected or duplicate assets");
+        }
+        const data = section.assetIds.map((assetId) =>
+          results.find((asset) => asset.assetId === assetId) ??
+          { assetId, status: "unavailable" as const, reason: "Market provider omitted this asset" },
+        );
+        const failures = data.filter((asset) => asset.status === "unavailable");
+        if (failures.length === data.length) {
+          return unavailable(section, failures.map((asset) => `${asset.assetId}: ${asset.reason}`).join("; "));
+        }
+        return { ...base, kind: "markets", outcome: { status: failures.length ? "partial" : "ok", data } };
       }
     }
   } catch (error) {
@@ -245,7 +272,16 @@ export function summariseRun(run: BriefingRunResult) {
               : { id: location.locationId, status: "ok" as const,
                 ...(location.warnings ? { warningsStatus: location.warnings.status } : {}) }),
           }
-          : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
+          : section.kind === "markets"
+            ? {
+              id: section.id, status: section.outcome.status,
+              items: section.outcome.data.filter((asset) => asset.status === "ok").length,
+              assets: section.outcome.data.map((asset) => ({
+                id: asset.assetId, status: asset.status,
+                ...(asset.status === "unavailable" ? { reason: asset.reason } : {}),
+              })),
+            }
+            : { id: section.id, status: "ok" as const, items: section.outcome.data.length },
     ),
     delivery: run.delivery,
   };

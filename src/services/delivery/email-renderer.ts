@@ -1,5 +1,7 @@
 import { SafeError, type BriefingModel, type BriefingSectionResult } from "@/types/briefing";
 import { addDays, localDate, startOfLocalDay } from "@/lib/date";
+import { marketAssets } from "@/config/market-assets";
+import { marketAssetResultSchema } from "@/types/markets";
 
 function escape(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
@@ -99,6 +101,50 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
       if (section.outcome.data.some((location) => !location.warnings)) {
         rows.push({ text: "Official weather warnings are not supplied by this forecast provider." });
       }
+      return rows;
+    }
+    case "markets": {
+      if (!section.outcome.data.length) return [{ text: "No market snapshots available." }];
+      if (!marketAssetResultSchema.array().safeParse(section.outcome.data).success) {
+        throw new SafeError("Email contains invalid market data");
+      }
+      const marketTime = (value: string) => new Intl.DateTimeFormat("en-GB", {
+        timeZone: briefing.timezone, day: "numeric", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      }).format(new Date(value));
+      const rows: { text: string; url?: string }[] = [];
+      for (const kind of ["stock", "crypto"] as const) {
+        const assets = section.outcome.data.filter((result) =>
+          marketAssets.find((asset) => asset.id === result.assetId)?.kind === kind,
+        );
+        if (!assets.length) continue;
+        rows.push({ text: kind === "stock" ? "Stocks (USD)" : "Crypto (BTC/ETH in GBP; XRP in USD)" });
+        for (const result of assets) {
+          const asset = marketAssets.find((asset) => asset.id === result.assetId);
+          if (!asset) throw new SafeError("Email contains an unknown market asset");
+          const label = `${asset.name} (${asset.symbol})`;
+          if (result.status === "unavailable") {
+            rows.push({ text: `${label}: Data unavailable: ${result.reason}` });
+            continue;
+          }
+          const price = new Intl.NumberFormat("en-GB", {
+            style: "currency", currency: asset.currency, currencyDisplay: "code",
+            minimumFractionDigits: 2, maximumFractionDigits: asset.id === "xrp" ? 4 : 2,
+          }).format(result.price);
+          const movement = result.change
+            ? `${new Intl.NumberFormat("en-GB", { signDisplay: "exceptZero", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(result.change.percent)}% ${
+              result.change.basis === "24-hours" ? "over 24 hours" : "vs previous close"
+            }`
+            : "change unavailable";
+          rows.push({
+            text: `${label}: ${price}; ${movement}; ${result.priceType === "close" ? "closing price" : "last trade"} as of ${
+              marketTime(result.asOf)
+            }${result.stale ? " (stale)" : ""}`,
+          });
+          rows.push({ text: `Source: ${result.source.name}`, url: sourceUrl(result.source.url) });
+        }
+      }
+      rows.push({ text: "Point-in-time snapshots, not a live feed. For personal informational use only." });
       return rows;
     }
     case "news":

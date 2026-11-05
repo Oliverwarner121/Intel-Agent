@@ -5,6 +5,7 @@ import {
   googleCalendarConfigFrom,
 } from "@/services/providers/calendar/google-calendar.provider";
 import type { ProviderRegistry } from "@/types/briefing";
+import { createResendDelivery } from "@/services/delivery/resend-delivery";
 
 /**
  * Production wiring of providers and delivery. A provider is registered only
@@ -17,7 +18,11 @@ export function createBriefingDependencies(env: ServerEnv): OrchestratorDependen
   const googleCalendar = googleCalendarConfigFrom(env);
   if (googleCalendar) providers.calendar["google-calendar"] = createGoogleCalendarProvider(googleCalendar);
 
-  return { providers };
+  return {
+    providers,
+    ...(env.APP_ENV === "prod" && env.EMAIL_SEND_ENABLED === "true"
+      ? { delivery: createResendDelivery(env) } : {}),
+  };
 }
 
 /**

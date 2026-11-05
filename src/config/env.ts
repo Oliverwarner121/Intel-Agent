@@ -14,6 +14,7 @@ const serverEnvSchema = z.object({
   GOOGLE_REFRESH_TOKEN: optionalSecret,
   GOOGLE_CALENDAR_ID: optionalSecret,
   GOOGLE_CALENDAR_MODE: z.enum(["single", "owned"]).optional(),
+  GNEWS_API_KEY: optionalSecret,
   RESEND_API_KEY: optionalSecret,
   EMAIL_FROM: optionalSecret,
   EMAIL_TO: optionalSecret,

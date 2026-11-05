@@ -13,4 +13,10 @@ export interface NewsStory {
   publisher: string;
   publishedAt: string;
   category: NewsCategory;
+  description?: string;
+}
+
+export interface NewsCollection {
+  stories: NewsStory[];
+  notice?: string;
 }

@@ -49,6 +49,33 @@ Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 Only `APP_ENV=prod` may send email; `local` and `dev` always run as previews.
 Tests mock all external services and never send email.
 
+### Local email preview
+
+Run `npm run email:preview` to fetch today's real Calendar, weather and enabled
+markets and render the same HTML/plain-text email used by delivery. It loads
+`.env.local`, forces `APP_ENV=local` and disables sending regardless of your
+saved email settings. Markets is included automatically when a Twelve Data key
+is present unless `MARKETS_ENABLED=false` is explicitly set.
+
+Open `.intel-agent-preview/morning-briefing.html` in your browser or a trusted
+local HTML preview extension. A plain-text version is saved beside it. These
+files contain private calendar information: they are Git-ignored, outside
+`public/`, and written with owner-only permissions. Do not upload them to online
+preview services. Delete the two files when finished. Running again overwrites
+the preview; provider gaps are shown as unavailable, just as in an email.
+
+Each run consumes eight market credits; wait at least a minute between runs.
+No development server, Cron request, deployment or email send is involved.
+Browser rendering is a layout preview, not proof of compatibility with every
+email client. Today's data differs from tomorrow's scheduled snapshot.
+
+The shared renderer uses a responsive, table-based email layout with inline
+light-theme defaults, system fonts and section cards. Supporting clients and
+the browser preview follow system dark mode via `prefers-color-scheme`. Clients
+that strip styles may retain the light theme or apply their own colour inversion;
+dark-mode behaviour is not guaranteed across Gmail/Outlook versions. No remote
+fonts, images, tracking pixels or JavaScript are needed. Plain text is unchanged.
+
 ### Markets (Twelve Data)
 
 Provider-independent market models, a section contract, orchestration and HTML/
@@ -105,7 +132,12 @@ the general plan-description text alone is not that permission. Twelve Data's
 [Basic plan](https://twelvedata.com/pricing) lists internal non-display usage. An
 attribution exemption or successful API request does not itself establish
 display rights. Reassess licensing before adding recipients, public display or
-commercial use. Source links credit Twelve Data beside each quote.
+commercial use. Source metadata is retained internally but omitted from the
+private email. HTML presents assets, prices and changes in a three-column table,
+with observation times and stale labels beneath each asset; plain text retains
+readable rows.
+Crypto changes use green for gains and red for losses, with dark-theme variants.
+Signs remain visible; zero and unavailable changes use neutral text.
 The public catalog confirmed `BTC/GBP`, `ETH/GBP` and `XRP/USD`; this does not
 prove account quote access. On 5 November 2026 at 13:19 UTC, an authorised local
 call through the actual adapter validated all eight quotes and their change
@@ -125,6 +157,25 @@ as `open-meteo`, and uses the briefing's London reporting date as both
 temperature in Celsius, maximum precipitation probability and maximum wind
 speed in km/h. Precipitation probability is not a prediction of rainfall amount
 and includes precipitation other than rain.
+
+Each location also includes today's complete hourly temperature, WMO conditions
+and precipitation probability, fetched in the same request. The email displays
+six daytime highlights (06:00, 09:00, 12:00, 15:00, 18:00 and 21:00 London time)
+in a compact card for each location, with weather emoji and accessible text
+alternatives. Location headings sit above each card; daily temperature range,
+maximum precipitation probability and maximum wind appear as wrapping pills
+inside it. Hourly icons include text
+alternatives, plus hot (30 C or
+above) and freezing (0 C or below) labels. These thresholds are presentation
+labels, not official warnings. Full hourly data is retrieved and validated but
+only these six times are displayed to keep mobile emails concise. HTML rounds
+temperatures to whole degrees; plain text retains provider precision.
+This is forecast data, not verified historical observations.
+Only the London reporting day is included. Hour counts and ordering are checked
+against consecutive local midnights (23/24/25 hours); selection uses London local
+times across GMT/BST changes. Invalid/missing hourly data preserves daily summaries but marks
+weather partial and shows hourly data unavailable. No additional API calls,
+remote icons or JavaScript are needed.
 
 Coordinates are fixed in [weather-locations.ts](src/config/weather-locations.ts);
 there is no daily geocoding. Verified on 5 November 2026 through the
@@ -169,6 +220,8 @@ with DTDs/entities, unexpected regions, invalid publication dates or non-Met
 Office warning links are rejected.
 
 These are **regional feed listings, not town-level or polygon matches**.
+Empty listings checked at the same instant are combined into one message naming
+both regions; active warnings and retrieval failures remain region-specific.
 The email preserves warning titles (including severity/hazard when provided),
 publication times and direct official links. All listed entries are shown,
 including warnings for future days; consult the linked warning for validity
@@ -196,7 +249,7 @@ RSS integration.
 The free API permits this personal non-commercial use under the
 [Open-Meteo terms](https://open-meteo.com/en/terms) (fewer than 10,000 calls/day,
 5,000/hour and 600/minute; shared Vercel IPs can hit limits sooner).
-Weather rows include [Open-Meteo attribution](https://open-meteo.com/), the
+The email footer includes one compact [Open-Meteo attribution](https://open-meteo.com/) per source, the
 [CC BY 4.0 licence](https://creativecommons.org/licenses/by/4.0/) and a note
 that daily codes were converted to condition text. Commercial use would require
 reviewing the provider's paid plans first.

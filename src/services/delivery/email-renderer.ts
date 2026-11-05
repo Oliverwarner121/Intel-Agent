@@ -51,13 +51,56 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
           }`;
         return { text: `${label}: ${event.title}${event.location ? ` - ${event.location}` : ""}` };
       });
-    case "weather":
+    case "weather": {
       if (!section.outcome.data.length) return [{ text: "No forecast data available." }];
-      return section.outcome.data.map((forecast) => ({
+      const rows = section.outcome.data.flatMap((forecast) => {
+        if ("unavailableReason" in forecast) {
+          return [{ text: `${forecast.locationName}: Data unavailable: ${forecast.unavailableReason}` }];
+        }
+        const items: { text: string; url?: string }[] = [{
         text: `${forecast.locationName}: ${forecast.summary}; ${forecast.temperatureMinC}-${forecast.temperatureMaxC} C${
-          forecast.precipitationProbabilityPercent === undefined ? "" : `; rain ${forecast.precipitationProbabilityPercent}%`
-        }${forecast.windSpeedMaxKph === undefined ? "" : `; wind up to ${forecast.windSpeedMaxKph} km/h`}`,
-      }));
+          forecast.precipitationProbabilityPercent === undefined ? "; precipitation probability unavailable" : `; precipitation probability up to ${forecast.precipitationProbabilityPercent}%`
+        }${forecast.windSpeedMaxKph === undefined ? "; maximum wind unavailable" : `; wind up to ${forecast.windSpeedMaxKph} km/h`}`,
+        }];
+        if (forecast.attribution) {
+          items.push(
+            { text: `${forecast.locationName} weather data by ${forecast.attribution.name} (daily forecast, condition code converted to text)`, url: sourceUrl(forecast.attribution.url) },
+            { text: "Licence: CC BY 4.0", url: sourceUrl(forecast.attribution.licenceUrl) },
+          );
+        }
+        return items;
+      });
+      const seenRegions = new Set<string>();
+      for (const location of section.outcome.data) {
+        const warnings = location.warnings;
+        if (!warnings || seenRegions.has(warnings.region)) continue;
+        seenRegions.add(warnings.region);
+        rows.push({ text: `Met Office regional warnings - ${warnings.region}. Regional coverage may not affect your exact location.` });
+        if (warnings.status === "unavailable") {
+          rows.push({ text: `Warnings unavailable: ${warnings.reason}` });
+        } else {
+          const checked = dateTime(warnings.checkedAt);
+          if (warnings.warnings.length === 0) {
+            rows.push({ text: `No warnings listed in this regional feed when checked ${checked}.` });
+          }
+          for (const warning of warnings.warnings) {
+            rows.push({
+              text: `${warning.title} (issued ${dateTime(warning.publishedAt)}; feed checked ${checked})`,
+              url: sourceUrl(warning.url),
+            });
+          }
+          rows.push(
+            { text: "Source: Met Office - check the official warning for affected areas and validity", url: "https://weather.metoffice.gov.uk/warnings-and-advice/uk-warnings" },
+            { text: "Contains public sector information licensed under the Open Government Licence v3.0",
+              url: "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" },
+          );
+        }
+      }
+      if (section.outcome.data.some((location) => !location.warnings)) {
+        rows.push({ text: "Official weather warnings are not supplied by this forecast provider." });
+      }
+      return rows;
+    }
     case "news":
       if (!section.outcome.data.length) return [{ text: "No stories selected." }];
       return section.outcome.data.map((story) => ({

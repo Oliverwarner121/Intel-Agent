@@ -26,11 +26,13 @@ Implemented:
 - GMT/BST-aware date utilities, bounded-retry JSON HTTP helper, structured
   logger and request-time environment validation.
 
-Phase 3 email rendering and Resend delivery are implemented and mock-tested,
-but not yet live-verified or deployed. Sending is disabled by default.
-Open-Meteo weather and news providers (Phases 4–5) are not yet implemented;
-their sections report unavailable. A provider whose credentials are missing
-is reported the same way.
+Phase 3 email rendering and Resend delivery are deployed and live-verified:
+the owner confirmed receipt and layout of the first manually triggered email
+on 5 November 2026. Production sending is enabled; scheduled receipt is not yet
+verified. Code defaults to sending disabled in new environments.
+Phase 4 Open-Meteo weather is implemented, mock-tested and live-verified locally
+for all three locations, but not yet deployed. News (Phase 5) is not implemented
+and reports unavailable. Missing provider credentials also report unavailable.
 
 ## Local development
 
@@ -46,6 +48,97 @@ curl -H "Authorization: Bearer <CRON_SECRET>" http://localhost:3000/api/cron/mor
 Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
 Only `APP_ENV=prod` may send email; `local` and `dev` always run as previews.
 Tests mock all external services and never send email.
+
+### Weather (Open-Meteo)
+
+No API key or extra environment variables are needed. The provider is registered
+as `open-meteo`, and uses the briefing's London reporting date as both
+`start_date` and `end_date`. It requests daily WMO conditions, minimum/maximum
+temperature in Celsius, maximum precipitation probability and maximum wind
+speed in km/h. Precipitation probability is not a prediction of rainfall amount
+and includes precipitation other than rain.
+
+Coordinates are fixed in [weather-locations.ts](src/config/weather-locations.ts);
+there is no daily geocoding. Verified on 5 November 2026 through the
+[Open-Meteo geocoding API](https://open-meteo.com/en/docs/geocoding-api)
+(GeoNames place IDs):
+
+| Location | Latitude | Longitude | Identity |
+| --- | --- | --- | --- |
+| Wheatley (Oxford) | 51.74731 | -1.13936 | 2634171; Oxfordshire, South Oxfordshire |
+| Wotton-under-Edge | 51.63242 | -2.34512 | 2633511; Gloucestershire, Stroud |
+| Lower Earley | 51.42708 | -0.91979 | 7290015; Wokingham, Earley |
+
+Locations are fetched concurrently in configured order, with a 6-second
+timeout per attempt, at most one transient retry and a 32 KiB response limit.
+Three daily forecast calls normally suffice (up to six with retries), plus
+two regional warning requests described below. The provider
+validates dates, units, array lengths, WMO codes and numeric ranges. Optional
+null measurements are labelled unavailable, not replaced by zero.
+
+A location failure preserves the other forecasts. The weather outcome becomes
+`partial`, the run reports `completed-with-gaps`, and safe summaries include
+location statuses plus the count of successful forecasts. If every location
+fails, the section reports unavailable with location-specific reasons.
+Public forecast values were live-validated through the actual provider for all
+three locations on 5 November 2026; this is not evidence of deployed weather
+or email rendering in an inbox.
+
+### Met Office regional warnings
+
+The weather provider also reads the official
+[Met Office warning RSS feeds](https://weather.metoffice.gov.uk/guides/rss):
+
+| Feed region | Locations |
+| --- | --- |
+| London & South East England (`se`) | Wheatley (Oxford), Lower Earley |
+| South West England (`sw`) | Wotton-under-Edge |
+
+Two public requests are made per briefing, concurrently with forecasts, with
+6-second attempt timeouts, at most one transient retry and 128 KiB XML limits.
+No API key is needed. Feeds are allowlisted and XML/schema validated; documents
+with DTDs/entities, unexpected regions, invalid publication dates or non-Met
+Office warning links are rejected.
+
+These are **regional feed listings, not town-level or polygon matches**.
+The email preserves warning titles (including severity/hazard when provided),
+publication times and direct official links. All listed entries are shown,
+including warnings for future days; consult the linked warning for validity
+and affected areas. Titles are not rewritten and warning areas/times are not
+inferred by scraping the website. A region is displayed once per email, with
+an explicit note that its warning may not affect the exact location.
+
+A validated empty feed displays "No warnings listed in this regional feed"
+with its check time, not a blanket claim that the town is safe or warning-free.
+Feeds can lag official updates, and an email is a point-in-time snapshot.
+Failed or malformed retrieval displays "Warnings unavailable" and marks weather
+partial while retaining forecasts and any successful region. Successful warning
+listings survive forecast failures as well.
+
+The Met Office [RSS usage guidance](https://weather.metoffice.gov.uk/guides/rss)
+permits display with attribution and direct content links, subject to its
+[website terms](https://www.metoffice.gov.uk/policies/tandc). The email attributes
+the Met Office and includes the Open Government Licence v3.0 statement/link.
+This integration uses the published RSS feeds, not undocumented web services.
+Both live regional feeds were successfully parsed on 5 November 2026 and
+contained zero entries. Non-empty warning parsing/rendering is mock-tested,
+not yet live-verified. Official geographic boundaries are not supplied by this
+RSS integration.
+
+The free API permits this personal non-commercial use under the
+[Open-Meteo terms](https://open-meteo.com/en/terms) (fewer than 10,000 calls/day,
+5,000/hour and 600/minute; shared Vercel IPs can hit limits sooner).
+Weather rows include [Open-Meteo attribution](https://open-meteo.com/), the
+[CC BY 4.0 licence](https://creativecommons.org/licenses/by/4.0/) and a note
+that daily codes were converted to condition text. Commercial use would require
+reviewing the provider's paid plans first.
+
+Roll out via the normal dev-to-prod pipeline. Production email is already
+enabled: promoting weather enables its inclusion in the next scheduled email.
+Do not rerun today's email merely to inspect the new weather payload; today's
+stable delivery key may conflict with a previously accepted email. Never change
+that key to bypass the conflict. Validate weather in preview before promotion,
+and verify the next scheduled email separately.
 
 ### Resend email setup
 

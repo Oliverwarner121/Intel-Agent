@@ -122,7 +122,8 @@ async function collectSection(
         if (failures.length === data.length && failures.length > 0 && !data.some((location) => location.warnings?.status === "ok")) {
           return unavailable(section, failures.map((location) => `${location.locationName}: ${location.unavailableReason}`).join("; "));
         }
-        if (failures.length > 0 || data.some((location) => location.warnings?.status === "unavailable")) {
+        if (failures.length > 0 || data.some((location) => location.warnings?.status === "unavailable" ||
+          (!("unavailableReason" in location) && location.hourlyUnavailableReason))) {
           return { ...base, kind: "weather", outcome: { status: "partial", data } };
         }
         return { ...base, kind: "weather", outcome: { status: "ok", data } };

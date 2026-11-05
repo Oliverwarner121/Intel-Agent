@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
+    "email:preview": "node --use-system-ca --env-file-if-exists=.env.local scripts/preview-email.mjs",
     "google:auth": "node --use-system-ca --env-file-if-exists=.env.local scripts/google-calendar-auth.mjs"
   },
   "dependencies": {

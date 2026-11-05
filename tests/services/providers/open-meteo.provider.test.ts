@@ -5,11 +5,17 @@ import { runBriefing, summariseRun } from "@/services/orchestration/briefing-orc
 import { renderBriefingEmail } from "@/services/delivery/email-renderer";
 import { createBriefingDependencies } from "@/services/orchestration/dependencies";
 import type { WeatherProvider } from "@/types/briefing";
+import { addDays, startOfLocalDay } from "@/lib/date";
 
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 afterEach(() => vi.useRealTimers());
 
 function payload(date = "2026-11-05") {
+  const start = startOfLocalDay(date, "Europe/London").getTime();
+  const count = (startOfLocalDay(addDays(date, 1), "Europe/London").getTime() - start) / 3_600_000;
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  });
   return {
     timezone: "Europe/London",
     daily_units: {
@@ -20,6 +26,13 @@ function payload(date = "2026-11-05") {
       time: [date], weather_code: [3], temperature_2m_min: [4.5], temperature_2m_max: [12],
       precipitation_probability_max: [0] as (number | null)[],
       wind_speed_10m_max: [0] as (number | null)[],
+    },
+    hourly_units: { time: "iso8601", temperature_2m: "\u00b0C", weather_code: "wmo code", precipitation_probability: "%" },
+    hourly: {
+      time: Array.from({ length: count }, (_, index) => `${date}T${clock.format(new Date(start + index * 3_600_000))}`),
+      temperature_2m: Array.from({ length: count }, () => 10),
+      weather_code: Array.from({ length: count }, () => 3),
+      precipitation_probability: Array.from({ length: count }, () => 0) as (number | null)[],
     },
   };
 }
@@ -71,6 +84,66 @@ describe("Open-Meteo provider", () => {
     const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
     expect(url.searchParams.get("start_date")).toBe(date);
     expect(url.searchParams.get("end_date")).toBe(date);
+    const forecast = results[0];
+    if (!forecast || "unavailableReason" in forecast) throw new Error("Missing forecast");
+    expect(forecast.hourly).toHaveLength(date === "2026-03-29" ? 23 : date === "2026-10-25" ? 25 : 24);
+    expect(forecast.hourly?.at(-1)?.at).toBe(new Date(startOfLocalDay(addDays(date, 1), "Europe/London").getTime() - 3_600_000).toISOString());
+  });
+
+  it.each(["missing", "units", "length", "date", "order", "code", "temperature", "probability"])(
+    "preserves daily data and marks weather partial when hourly %s is invalid",
+    async (variant) => {
+      const data = payload();
+      if (variant === "units") data.hourly_units.temperature_2m = "F";
+      if (variant === "length") data.hourly.temperature_2m.pop();
+      if (variant === "date") data.hourly.time[0] = "2026-11-06T00:00";
+      if (variant === "order") data.hourly.time.reverse();
+      if (variant === "code") data.hourly.weather_code[0] = 123;
+      if (variant === "temperature") data.hourly.temperature_2m[0] = NaN;
+      if (variant === "probability") data.hourly.precipitation_probability[0] = 101;
+      const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>
+        Response.json(variant === "missing" ? { ...data, hourly: undefined } : data));
+      const run = await runBriefing("morning-briefing", "preview", {
+        now: () => context().now,
+        providers: { calendar: {}, news: {}, weather: { "open-meteo": createOpenMeteoProvider(fetchImpl) } },
+      });
+      const section = run.briefing?.sections.find((section) => section.kind === "weather");
+      expect(section?.outcome.status).toBe("partial");
+      if (section?.kind !== "weather" || section.outcome.status === "unavailable") throw new Error("Missing weather");
+      expect(section.outcome.data[0]).toMatchObject({ summary: "Overcast", hourlyUnavailableReason: expect.any(String) });
+      expect(section.outcome.data[0]).not.toHaveProperty("hourly");
+    },
+  );
+
+  it("renders six compact daytime highlights per location with accessible weather icons", async () => {
+    const data = payload();
+    [0, 2, 45, 65, 75, 95].forEach((code, index) => {
+      data.hourly.weather_code[6 + index * 3] = code;
+    });
+    data.hourly.temperature_2m[6] = 31;
+    data.hourly.temperature_2m[18] = -1;
+    data.hourly.precipitation_probability[6] = null;
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => Response.json(data));
+    const run = await runBriefing("morning-briefing", "preview", {
+      now: () => context().now,
+      providers: { calendar: {}, news: {}, weather: { "open-meteo": createOpenMeteoProvider(fetchImpl) } },
+    });
+    if (!run.briefing) throw new Error("Missing briefing");
+    const rendered = renderBriefingEmail(run.briefing, "morning-briefing");
+    for (const output of [rendered.html, rendered.text]) {
+      if (output === rendered.text) expect(output.match(/Today's forecast highlights/g)).toHaveLength(3);
+      else expect(output).not.toContain("Today's forecast highlights");
+      for (const emoji of ["☀️", "🌤️", "🌫️", "🌧️", "🌨️", "⛈️", "🌡️", "❄️"]) expect(output).toContain(emoji);
+      expect(output).toContain("21:00");
+      expect(output).not.toContain("23:00");
+      expect(output).not.toContain("00:00 GMT");
+      expect(output).not.toContain("2026-11-06");
+    }
+    expect(rendered.html).toContain("n/a");
+    expect(rendered.html).toContain("0%");
+    expect(rendered.html.match(/role="img"/g)).toHaveLength(18);
+    expect(rendered.html).toContain('aria-label="Heavy snowfall"');
+    expect(rendered.html).not.toContain(">Overcast</span>");
   });
 
   it.each([
@@ -231,8 +304,8 @@ describe("weather orchestration and rendering", () => {
     const rendered = renderBriefingEmail(run.briefing, "morning-briefing");
     for (const output of [rendered.html, rendered.text]) {
       expect(output).toContain("Wheatley (Oxford): Data unavailable:");
-      expect(output).toContain("Wotton-under-Edge: Overcast");
-      expect(output).toContain("Lower Earley: Overcast");
+      expect(output).toContain(output === rendered.html ? ">Wotton-under-Edge</h3>" : "Wotton-under-Edge: Overcast");
+      expect(output).toContain(output === rendered.html ? ">Lower Earley, Reading</h3>" : "Lower Earley, Reading: Overcast");
       expect(output).toContain("https://open-meteo.com/");
       expect(output).toContain("https://creativecommons.org/licenses/by/4.0/");
       expect(output).toContain("Official weather warnings are not supplied");

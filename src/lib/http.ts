@@ -25,8 +25,8 @@ export interface FetchJsonOptions {
 
 const transientStatuses = new Set([408, 429, 500, 502, 503, 504]);
 
-async function readJson(response: Response, limit?: number): Promise<unknown> {
-  if (limit === undefined) return response.json();
+async function readText(response: Response, limit?: number): Promise<string> {
+  if (limit === undefined) return response.text();
   if (!Number.isSafeInteger(limit) || limit <= 0) throw new HttpError("Invalid response size limit");
   const reader = response.body?.getReader();
   if (!reader) throw new HttpError("Response was not valid JSON", response.status);
@@ -43,7 +43,7 @@ async function readJson(response: Response, limit?: number): Promise<unknown> {
       }
       chunks.push(value);
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return Buffer.concat(chunks).toString("utf8");
   } finally {
     reader.releaseLock();
   }
@@ -64,7 +64,9 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function attempt<T>(url: string, schema: z.ZodType<T>, options: FetchJsonOptions): Promise<T> {
+async function attempt<T>(
+  url: string, parse: (text: string, status: number) => T, options: FetchJsonOptions,
+): Promise<T> {
   const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   let response: Response;
@@ -80,34 +82,51 @@ async function attempt<T>(url: string, schema: z.ZodType<T>, options: FetchJsonO
     await response.body?.cancel().catch(() => undefined);
     throw new HttpError(`HTTP ${response.status}`, response.status, transientStatuses.has(response.status));
   }
-  let body: unknown;
+  let text: string;
   try {
-    body = await readJson(response, options.maxResponseBytes);
+    text = await readText(response, options.maxResponseBytes);
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    throw new HttpError("Response was not valid JSON", response.status);
+    throw new HttpError("Response body could not be read", response.status);
   }
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    throw new HttpError("Response did not match the expected schema", response.status);
-  }
-  return parsed.data;
+  return parse(text, response.status);
 }
 
-/** Fetches JSON with a per-attempt timeout, bounded transient retries and validation. */
-export async function fetchJson<T>(
+async function fetchParsed<T>(
   url: string,
-  schema: z.ZodType<T>,
+  parse: (text: string, status: number) => T,
   options: FetchJsonOptions = {},
 ): Promise<T> {
   const retries = Math.max(0, Math.min(options.retries ?? 1, 3));
   for (let attemptNumber = 0; ; attemptNumber++) {
     try {
-      return await attempt(url, schema, options);
+      return await attempt(url, parse, options);
     } catch (error) {
       const retryable = error instanceof HttpError && error.retryable;
       if (!retryable || attemptNumber >= retries) throw error;
       await sleep((options.retryDelayMs ?? 250) * 2 ** attemptNumber, options.signal);
     }
+
   }
+}
+
+/** Fetches JSON with a per-attempt timeout, bounded transient retries and validation. */
+export function fetchJson<T>(
+  url: string, schema: z.ZodType<T>, options: FetchJsonOptions = {},
+): Promise<T> {
+  return fetchParsed(url, (text, status) => {
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new HttpError("Response was not valid JSON", status);
+    }
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) throw new HttpError("Response did not match the expected schema", status);
+    return parsed.data;
+  }, options);
+}
+
+export function fetchText(url: string, options: FetchJsonOptions = {}): Promise<string> {
+  return fetchParsed(url, (text) => text, options);
 }

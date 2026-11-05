@@ -9,6 +9,7 @@ export interface WeatherForecast {
   precipitationProbabilityPercent?: number;
   windSpeedMaxKph?: number;
   attribution?: { name: string; url: string; licenceUrl: string };
+  warnings?: WeatherWarnings;
 }
 
 export interface UnavailableWeatherLocation {
@@ -16,6 +17,17 @@ export interface UnavailableWeatherLocation {
   locationName: string;
   date: string;
   unavailableReason: string;
+  warnings?: WeatherWarnings;
 }
 
 export type WeatherLocationResult = WeatherForecast | UnavailableWeatherLocation;
+
+export interface WeatherWarning {
+  title: string;
+  url: string;
+  publishedAt: string;
+}
+
+export type WeatherWarnings =
+  | { status: "ok"; region: string; checkedAt: string; warnings: WeatherWarning[] }
+  | { status: "unavailable"; region: string; reason: string };

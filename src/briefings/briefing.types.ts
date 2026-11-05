@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isValidTimezone } from "@/lib/date";
 import { newsCategories } from "@/types/news";
+import { marketAssetIds } from "@/types/markets";
 
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "must be a lowercase kebab-case identifier");
 
@@ -31,10 +32,18 @@ const newsSectionSchema = z.object({
   windowHours: z.int().min(1).max(168),
 });
 
+const marketsSectionSchema = z.object({
+  ...sectionBase,
+  kind: z.literal("markets"),
+  assetIds: z.array(z.enum(marketAssetIds)).min(1).max(8)
+    .refine((ids) => new Set(ids).size === ids.length, "market asset IDs must be unique"),
+});
+
 export const briefingSectionSchema = z.discriminatedUnion("kind", [
   calendarSectionSchema,
   weatherSectionSchema,
   newsSectionSchema,
+  marketsSectionSchema,
 ]);
 
 export const briefingDefinitionSchema = z.object({

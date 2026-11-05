@@ -6,6 +6,13 @@ const schema = z.object({ value: z.number() });
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
 describe("fetchJson", () => {
+  it("limits bytes read and does not retry oversized JSON", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => ok({ value: 1 }));
+    await expect(fetchJson("https://example.test", schema, { fetchImpl, maxResponseBytes: 11 })).resolves.toEqual({ value: 1 });
+    await expect(fetchJson("https://example.test", schema, { fetchImpl, maxResponseBytes: 10 })).rejects.toThrow("size limit");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("returns validated data", async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(ok({ value: 1 }));
     await expect(fetchJson("https://example.test", schema, { fetchImpl })).resolves.toEqual({ value: 1 });

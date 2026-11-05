@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { Buffer } from "node:buffer";
 
 export class HttpError extends Error {
   constructor(
@@ -19,9 +20,34 @@ export interface FetchJsonOptions {
   retryDelayMs?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  maxResponseBytes?: number;
 }
 
 const transientStatuses = new Set([408, 429, 500, 502, 503, 504]);
+
+async function readJson(response: Response, limit?: number): Promise<unknown> {
+  if (limit === undefined) return response.json();
+  if (!Number.isSafeInteger(limit) || limit <= 0) throw new HttpError("Invalid response size limit");
+  const reader = response.body?.getReader();
+  if (!reader) throw new HttpError("Response was not valid JSON", response.status);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        throw new HttpError("Response exceeded the size limit", response.status);
+      }
+      chunks.push(value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -56,8 +82,9 @@ async function attempt<T>(url: string, schema: z.ZodType<T>, options: FetchJsonO
   }
   let body: unknown;
   try {
-    body = await response.json();
-  } catch {
+    body = await readJson(response, options.maxResponseBytes);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
     throw new HttpError("Response was not valid JSON", response.status);
   }
   const parsed = schema.safeParse(body);

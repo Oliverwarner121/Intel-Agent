@@ -2,18 +2,19 @@ import type { SectionKind } from "@/briefings/briefing.types";
 import type { LocalDayPeriod, ReportingPeriod } from "@/lib/date";
 import type { CalendarEvent } from "@/types/calendar";
 import type { NewsCategory, NewsStory } from "@/types/news";
-import type { WeatherForecast } from "@/types/weather";
+import type { WeatherLocationResult } from "@/types/weather";
 
 export interface SectionDataByKind {
   calendar: CalendarEvent[];
-  weather: WeatherForecast[];
+  weather: WeatherLocationResult[];
   news: NewsStory[];
 }
 
 /** Empty data is "ok" with no items; failed retrieval is "unavailable". */
 export type SectionOutcome<K extends SectionKind> =
   | { status: "ok"; data: SectionDataByKind[K] }
-  | { status: "unavailable"; reason: string };
+  | { status: "unavailable"; reason: string }
+  | (K extends "weather" ? { status: "partial"; data: SectionDataByKind[K] } : never);
 
 export type BriefingSectionResult = {
   [K in SectionKind]: { id: string; title: string; kind: K; outcome: SectionOutcome<K> };
@@ -42,7 +43,7 @@ export type CalendarProvider = (
 
 export type WeatherProvider = (
   request: ProviderContext & { locationIds: string[] },
-) => Promise<WeatherForecast[]>;
+) => Promise<WeatherLocationResult[]>;
 
 export type NewsProvider = (
   request: ProviderContext & { category: NewsCategory; window: ReportingPeriod; maxStories: number },

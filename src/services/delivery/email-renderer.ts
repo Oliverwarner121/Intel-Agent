@@ -53,11 +53,23 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
       });
     case "weather":
       if (!section.outcome.data.length) return [{ text: "No forecast data available." }];
-      return section.outcome.data.map((forecast) => ({
+      return [...section.outcome.data.flatMap((forecast) => {
+        if ("unavailableReason" in forecast) {
+          return [{ text: `${forecast.locationName}: Data unavailable: ${forecast.unavailableReason}` }];
+        }
+        const items: { text: string; url?: string }[] = [{
         text: `${forecast.locationName}: ${forecast.summary}; ${forecast.temperatureMinC}-${forecast.temperatureMaxC} C${
-          forecast.precipitationProbabilityPercent === undefined ? "" : `; rain ${forecast.precipitationProbabilityPercent}%`
-        }${forecast.windSpeedMaxKph === undefined ? "" : `; wind up to ${forecast.windSpeedMaxKph} km/h`}`,
-      }));
+          forecast.precipitationProbabilityPercent === undefined ? "; precipitation probability unavailable" : `; precipitation probability up to ${forecast.precipitationProbabilityPercent}%`
+        }${forecast.windSpeedMaxKph === undefined ? "; maximum wind unavailable" : `; wind up to ${forecast.windSpeedMaxKph} km/h`}`,
+        }];
+        if (forecast.attribution) {
+          items.push(
+            { text: `${forecast.locationName} weather data by ${forecast.attribution.name} (daily forecast, condition code converted to text)`, url: sourceUrl(forecast.attribution.url) },
+            { text: "Licence: CC BY 4.0", url: sourceUrl(forecast.attribution.licenceUrl) },
+          );
+        }
+        return items;
+      }), { text: "Official weather warnings are not supplied by this forecast provider." }];
     case "news":
       if (!section.outcome.data.length) return [{ text: "No stories selected." }];
       return section.outcome.data.map((story) => ({

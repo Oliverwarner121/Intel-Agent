@@ -38,6 +38,12 @@ interface EmailItem {
   hours?: HourlyWeatherForecast[];
   weather?: { location: string; summary: string; pills: string[] };
   calendar?: { text: string; name?: string; color?: string };
+  news?: { title: string; description?: string; publisher: string; published: string };
+}
+
+function sectionTitle(section: BriefingSectionResult): string {
+  const emoji = { calendar: "📅", weather: "🌤️", news: "📰", markets: "💰" }[section.kind];
+  return `${emoji} ${section.title}`;
 }
 
 function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): EmailItem[] {
@@ -230,15 +236,21 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
       rows.push({ text: "Point-in-time snapshots, not a live feed. For personal informational use only." });
       return rows;
     }
-    case "news":
-      if (!section.outcome.data.length) return [{ text: "No stories selected." }];
-      return section.outcome.data.map((story) => ({
-        text: `${story.title} - ${story.publisher}, ${dateTime(story.publishedAt)}${
+    case "news": {
+      const notice = section.outcome.notice ? [{ text: section.outcome.notice, compact: true }] : [];
+      if (!section.outcome.data.length) return [...notice, { text: "No stories selected." }];
+      return [...notice, ...section.outcome.data.map((story) => {
+        const published = `${dateTime(story.publishedAt)}${
           new Date(story.publishedAt).getTime() < new Date(briefing.generatedAt).getTime() - 86_400_000
             ? " (older than 24 hours)" : ""
-        }`,
-        url: sourceUrl(story.url),
-      }));
+        }`;
+        return {
+          text: `${story.title}${story.description ? `\nPublisher excerpt: ${story.description}` : ""}\nSource: ${story.publisher} | Published: ${published}`,
+          url: sourceUrl(story.url),
+          news: { title: story.title, description: story.description, publisher: story.publisher, published },
+        };
+      })];
+    }
   }
 }
 
@@ -282,6 +294,19 @@ function renderCalendarEvent(calendar: NonNullable<EmailItem["calendar"]>): stri
 }
 
 function renderItems(section: BriefingSectionResult, items: EmailItem[], timezone: string): string {
+  if (section.kind === "news") {
+    return `<table role="presentation" width="100%" style="width:100%">${items.map((item) => {
+      if (!item.news || !item.url) {
+        return `<tr><td class="muted" style="padding:0 0 12px;color:#657687;font-size:12px;line-height:1.6">${escape(item.text)}</td></tr>`;
+      }
+      return `<tr><td class="rule" style="padding:14px 0;border-bottom:1px solid #e8eef2;overflow-wrap:anywhere">
+<p class="heading" style="margin:0 0 8px;color:#182d3e;font-weight:600;line-height:1.5">${escape(item.news.title)}</p>
+${item.news.description ? `<p class="copy" style="margin:0 0 8px;color:#34495b;font-size:14px;line-height:1.7"><span class="muted" style="color:#657687;font-size:11px">Publisher excerpt:</span> ${escape(item.news.description)}</p>` : ""}
+<p class="muted" style="margin:0 0 8px;color:#657687;font-size:12px;line-height:1.6">Source: ${escape(item.news.publisher)} | Published: ${escape(item.news.published)}</p>
+<a class="link" href="${escape(item.url)}" style="color:#08796d;font-size:13px;text-decoration:underline">Read more</a>
+</td></tr>`;
+    }).join("")}</table>`;
+  }
   if (section.kind === "markets" && items.some((item) => item.columns)) {
     const cell = "padding:12px 4px;border-bottom:1px solid #e8eef2;vertical-align:top;overflow-wrap:anywhere;line-height:1.6";
     return `<table width="100%" aria-label="Market snapshots" style="width:100%;table-layout:fixed;font-size:13px;border-collapse:collapse">
@@ -315,7 +340,7 @@ export function renderBriefingEmail(briefing: BriefingModel, template: string): 
   const attribution = [...credits.values()];
   return {
     text: `${briefing.name}\n${date}\nTimes: ${briefing.timezone}\n\n${sections.map(({ section, items }) =>
-      `${section.title}\n${items.map((item) => `- ${item.text}${item.url ? `\n  ${item.url}` : ""}`).join("\n")}`
+      `${sectionTitle(section)}\n${items.map((item) => `- ${item.text}${item.url ? `\n  ${item.url}` : ""}`).join("\n")}`
     ).join("\n\n")}${attribution.length ? `\n\nData credits\n${attribution.map((item) => `${item.text}${item.url ? `\n${item.url}` : ""}`).join("\n")}` : ""}`,
     html: `<!doctype html>
 <html lang="en">
@@ -365,7 +390,7 @@ ${sections.map(({ section, items }, index) => {
   const accent = section.outcome.status === "unavailable" ? "#b77926" : "#168477";
   return `<tr><td class="surface card" style="padding:26px 30px;background-color:#ffffff;border:1px solid #dce5eb;border-radius:14px">
 <p class="muted" style="margin:0 0 9px;color:#657687;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase"><span style="color:${accent}">${String(index + 1).padStart(2, "0")}</span> &nbsp;/&nbsp; ${section.kind === "markets" ? "MARKET SNAPSHOT" : section.kind === "calendar" ? "YOUR SCHEDULE" : section.kind === "weather" ? "LOCAL OUTLOOK" : "THE HEADLINES"}</p>
-<h2 class="heading" style="margin:0 0 18px;color:#182d3e;font-size:22px;font-weight:700;letter-spacing:-0.4px;line-height:1.3">${escape(section.title)}</h2>
+<h2 class="heading" style="margin:0 0 18px;color:#182d3e;font-size:22px;font-weight:700;letter-spacing:-0.4px;line-height:1.3">${escape(sectionTitle(section))}</h2>
 ${renderItems(section, items, briefing.timezone)}
 </td></tr><tr><td style="height:16px;font-size:1px;line-height:16px">&nbsp;</td></tr>`;
 }).join("")}

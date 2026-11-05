@@ -286,7 +286,7 @@ describe("weather orchestration and rendering", () => {
       providers: {
         calendar: { "google-calendar": async () => [] },
         weather: { "open-meteo": createOpenMeteoProvider(fetchImpl) },
-        news: { rss: async () => [] },
+        news: { gnews: async () => [] },
       },
     });
     expect(run.status).toBe("completed-with-gaps");

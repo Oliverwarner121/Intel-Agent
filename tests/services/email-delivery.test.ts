@@ -33,6 +33,22 @@ function model(): BriefingModel {
 const request = (): DeliveryRequest => ({ briefing: model(), template: "morning-briefing", subject: "Morning briefing" });
 
 describe("email renderer", () => {
+  it("adds matching emojis to every section heading in HTML and plain text", () => {
+    const briefing = model();
+    briefing.sections.push({
+      id: "markets", kind: "markets", title: "Markets",
+      outcome: { status: "unavailable", reason: "Not configured" },
+    });
+    const { html, text } = renderBriefingEmail(briefing, "morning-briefing");
+    for (const title of [
+      "📅 Today's Calendar", "🌤️ Weather", "📰 Worldwide Tech and AI",
+      "📰 UK Politics and Finance", "📰 Global Affairs", "💰 Markets",
+    ]) {
+      expect(text).toContain(`${title}\n`);
+      expect(html).toContain(`${title.replace("'", "&#39;")}</h2>`);
+    }
+  });
+
   it("consolidates required weather attribution in the footer outside the section cards", () => {
     const briefing = model();
     briefing.sections[1] = {
@@ -111,7 +127,7 @@ describe("email renderer", () => {
     ] } };
     const rendered = renderBriefingEmail(briefing, "morning-briefing");
     expect(rendered.html).toContain('href="https://example.com/?a=1&amp;b=2"');
-    expect(rendered.text).toContain("Publisher, 30 Jun, 05:00 (older than 24 hours)");
+    expect(rendered.text).toContain("Source: Publisher | Published: 30 Jun, 05:00 (older than 24 hours)");
   });
 
   it("rejects unknown templates", () => {

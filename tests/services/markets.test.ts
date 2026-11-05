@@ -47,7 +47,7 @@ async function run(markets?: MarketsProvider) {
     providers: {
       calendar: { "google-calendar": async () => [] },
       weather: { "open-meteo": async () => [] },
-      news: { rss: async () => [] },
+      news: { gnews: async () => [] },
       markets: markets ? { "mock-markets": markets } : {},
     },
   });

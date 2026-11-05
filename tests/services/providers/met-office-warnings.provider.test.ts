@@ -113,7 +113,7 @@ describe("regional warning collection", () => {
   it("renders each region once with scope, attribution and direct warning links", async () => {
     const run = await runBriefing("morning-briefing", "preview", {
       now: () => context.now, providers: {
-        calendar: { "google-calendar": async () => [] }, news: { rss: async () => [] },
+        calendar: { "google-calendar": async () => [] }, news: { gnews: async () => [] },
         weather: { "open-meteo": withMetOfficeWarnings(forecasts, fetchFeeds(warning)) },
       },
     });

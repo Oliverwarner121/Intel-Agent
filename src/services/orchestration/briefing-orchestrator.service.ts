@@ -138,7 +138,7 @@ async function collectSection(
       case "news": {
         const provider = providers.news[section.provider];
         if (!provider) return notConfigured(section);
-        const data = await withTimeout(
+        const response = await withTimeout(
           (signal) =>
             provider({
               ...context,
@@ -152,7 +152,11 @@ async function collectSection(
         return {
           ...base,
           kind: "news",
-          outcome: { status: "ok", data: data.slice(0, section.maxStories) },
+          outcome: {
+            status: "ok",
+            data: (Array.isArray(response) ? response : response.stories).slice(0, section.maxStories),
+            ...(!Array.isArray(response) && response.notice ? { notice: response.notice } : {}),
+          },
         };
       }
       case "markets": {

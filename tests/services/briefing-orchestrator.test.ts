@@ -43,7 +43,7 @@ const news: NewsProvider = async ({ category }) => [1, 2, 3, 4, 5].map((index) =
 
 function deps(overrides: Partial<OrchestratorDependencies> = {}): OrchestratorDependencies {
   return {
-    providers: { calendar: { "google-calendar": calendar }, weather: { "open-meteo": weather }, news: { rss: news } },
+    providers: { calendar: { "google-calendar": calendar }, weather: { "open-meteo": weather }, news: { gnews: news } },
     now: () => NOW,
     createRunId: () => "run-1",
     sectionTimeoutMs: 50,
@@ -57,7 +57,7 @@ describe("runBriefing", () => {
     const run = await runBriefing(
       "morning-briefing",
       "preview",
-      deps({ providers: { calendar: { "google-calendar": calendarSpy }, weather: { "open-meteo": weather }, news: { rss: news } } }),
+      deps({ providers: { calendar: { "google-calendar": calendarSpy }, weather: { "open-meteo": weather }, news: { gnews: news } } }),
     );
     expect(run.status).toBe("completed");
     expect(run.reportingDate).toBe("2026-07-01");
@@ -78,7 +78,7 @@ describe("runBriefing", () => {
     const run = await runBriefing(
       "morning-briefing",
       "preview",
-      deps({ providers: { calendar: { "google-calendar": calendar }, weather: { "open-meteo": weather }, news: { rss: newsSpy } } }),
+      deps({ providers: { calendar: { "google-calendar": calendar }, weather: { "open-meteo": weather }, news: { gnews: newsSpy } } }),
     );
     expect(newsSpy.mock.calls.map(([request]) => request.category)).toEqual([
       "tech-ai",
@@ -107,7 +107,7 @@ describe("runBriefing", () => {
     const outcomes = Object.fromEntries((run.briefing?.sections ?? []).map((section) => [section.id, section.outcome]));
     expect(outcomes.calendar).toEqual({ status: "unavailable", reason: "Provider request failed" });
     expect(outcomes.weather).toEqual({ status: "unavailable", reason: "Timed out after 50 ms" });
-    expect(outcomes["tech-ai"]).toEqual({ status: "unavailable", reason: 'Provider "rss" is not configured' });
+    expect(outcomes["tech-ai"]).toEqual({ status: "unavailable", reason: 'Provider "gnews" is not configured' });
     expect(JSON.stringify(run)).not.toContain("abc123");
   });
 
@@ -115,7 +115,7 @@ describe("runBriefing", () => {
     const run = await runBriefing(
       "morning-briefing",
       "preview",
-      deps({ providers: { calendar: { "google-calendar": async () => [] }, weather: { "open-meteo": weather }, news: { rss: news } } }),
+      deps({ providers: { calendar: { "google-calendar": async () => [] }, weather: { "open-meteo": weather }, news: { gnews: news } } }),
     );
     expect(run.briefing?.sections[0]?.outcome).toEqual({ status: "ok", data: [] });
     expect(run.status).toBe("completed");

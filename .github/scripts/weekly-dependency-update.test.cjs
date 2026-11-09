@@ -80,6 +80,28 @@ test("allows held packages to receive current-major updates", () => {
   assert.equal(plan.updates[0].specifier, "^24.2.0");
 });
 
+test("holds TypeScript 7 until lint tooling supports it", () => {
+  const plan = planNpm(
+    { devDependencies: { typescript: "^6.0.3" } },
+    { packages: { "node_modules/typescript": { version: "6.0.3" } } },
+    new Map([["typescript", "7.0.2"]]),
+  );
+  assert.deepEqual(plan.updates, []);
+  assert.equal(plan.held.length, 1);
+  assert.equal(plan.held[0].name, "typescript");
+  assert.match(plan.held[0].reason, /typescript-eslint/);
+});
+
+test("allows TypeScript 6 patch updates", () => {
+  const plan = planNpm(
+    { devDependencies: { typescript: "^6.0.3" } },
+    { packages: { "node_modules/typescript": { version: "6.0.3" } } },
+    new Map([["typescript", "6.0.4"]]),
+  );
+  assert.deepEqual(plan.held, []);
+  assert.equal(plan.updates[0].specifier, "^6.0.4");
+});
+
 test("ignores prerelease registry versions and missing lock entries", () => {
   assert.deepEqual(
     planNpm(

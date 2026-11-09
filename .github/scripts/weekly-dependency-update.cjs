@@ -24,6 +24,7 @@ const pinnedAction =
 // Major upgrades that need deliberate work. Minor and patch updates still apply.
 const heldMajors = new Map([
   ["@types/node", "Types must match the Node 24 LTS runtime."],
+  ["typescript", "typescript-eslint requires TypeScript 6; review compiler API support before upgrading."],
 ]);
 
 function parse(version) {

@@ -40,6 +40,8 @@ Missing provider credentials report unavailable.
 ## Local development
 
 Requires Node.js 24.
+TypeScript stays on 6.x while the ESLint TypeScript tooling lacks TypeScript 7
+compiler API support.
 
 ```sh
 npm ci
@@ -613,7 +615,8 @@ follows the GetActive pattern instead of Dependabot version PRs. Every Monday at
    write token.
 2. Holds back majors listed in `heldMajors` in
    [the update script](.github/scripts/weekly-dependency-update.cjs) and retries
-   failed batches one package at a time.
+   failed batches one package at a time. Node types stay on the runtime's major;
+   TypeScript major upgrades require a deliberate lint-tooling compatibility check.
 3. Checks SHA-pinned GitHub Actions for newer non-major releases.
 4. Force-pushes branch `deps/weekly` and opens or refreshes one PR labelled
    `dependencies`, with a summary table and production audit counts.

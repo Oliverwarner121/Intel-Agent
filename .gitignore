@@ -8,3 +8,4 @@ coverage/
 next-env.d.ts
 .env*
 .intel-agent-preview/
+/AGENTS.md

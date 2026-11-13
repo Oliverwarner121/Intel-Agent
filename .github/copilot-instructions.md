@@ -43,3 +43,7 @@
 - Distinguish implemented, mock-tested, live-verified and deployed. Never claim provider acceptance proves inbox delivery.
 - Update directly related setup and operation documentation. Add environment examples only for variables actually required.
 - Use the matching workflow in [skills](./skills/) for adding briefings/providers, verifying integrations, testing or production readiness.
+
+## Next.js version
+
+This version of Next.js has breaking changes: APIs, conventions and file structure may differ from what you expect. Read the relevant guide in `node_modules/next/dist/docs/` before writing Next.js code, and heed deprecation notices.

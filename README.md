@@ -1,57 +1,52 @@
 # Intel-Agent
 
-A personal, configuration-driven platform that emails a daily briefing: a
-calendar overview, local weather and a handful of selected news headlines.
+Intel-Agent is an automated briefing service that emails you the information you
+need for the day: your calendar, local weather and a handful of selected news
+headlines, all in one message.
 
-> This is a personal project, shared publicly to show how it is built. It is not
-> packaged for others to deploy, and setup instructions are intentionally not
-> provided.
+## Capabilities
 
-## What it does
-
-The first briefing is a morning email with these sections, in order:
-
-1. **Today's Calendar** – events from Google Calendar for the current day.
-2. **Weather** – forecasts for a few fixed locations, plus UK Met Office warnings.
-3. **Worldwide Tech and AI**, **UK Politics and Finance** and **Global Affairs** –
-   up to three recent headlines per category, with publisher, publication time
-   and a link to the original source.
-
-A markets section also exists in the code but is optional and disabled by default.
-
-There is no AI-generated content. The email shows data from the providers and
-selected headlines only. Each section is collected independently, so if one
-source fails the rest of the email is still sent and the gap is clearly marked.
-All times use the `Europe/London` timezone, including across GMT/BST changes.
+- **Calendar overview** – lists the day's events from Google Calendar, including
+  all-day, multi-day and recurring events, with cancelled and declined events
+  left out.
+- **Weather** – forecasts for a set of chosen locations, plus UK Met Office
+  weather warnings.
+- **News headlines** – up to three recent stories for each of Worldwide Tech and
+  AI, UK Politics and Finance, and Global Affairs, each shown with its publisher,
+  publication time and a link to the original source.
+- **Markets** – an optional section for tracked market assets.
+- **Scheduled delivery** – the briefing is generated and emailed automatically
+  every morning, and is built from a configurable briefing definition.
+- **Resilient by design** – each section is collected independently, so if one
+  source is unavailable the rest of the email is still delivered and the gap is
+  clearly marked.
+- **Correct local times** – all dates and times use `Europe/London`, including
+  across GMT/BST changes.
+- **No AI-generated text** – the email contains only data from the providers and
+  headlines chosen by deterministic rules.
 
 ## How it works
 
 ```
-Scheduler → briefing orchestrator → data providers → deterministic processing → email renderer → delivery
+Scheduler → briefing orchestrator → data providers → processing → email renderer → delivery
 ```
 
-- **Briefing definitions** are validated TypeScript objects held in a simple registry.
-- **Providers** wrap each external service and return shared domain types:
+- **Briefing definitions** describe which sections a briefing contains, their
+  order and their limits.
+- **Providers** wrap each external service and return shared, validated types:
   Google Calendar, Open-Meteo, Met Office warnings, GNews and Twelve Data.
-- **News selection** is deterministic: no model decides what is shown.
-- **Delivery** goes through Resend, with a stable delivery key per briefing,
-  date and recipient so a run is not delivered twice.
-- **Scheduling** uses a Vercel Cron job that calls a protected route.
+- **Delivery** goes through Resend, using a stable key per briefing, date and
+  recipient so the same briefing is not sent twice.
+- **Scheduling** uses a protected Vercel Cron route.
 
 ## Tech stack
 
-Next.js (App Router), strict TypeScript, Node.js, Zod for validating external
-data, Vitest and ESLint. All external services are mocked in the test suite,
-which never sends real email.
+Next.js (App Router), TypeScript, Node.js, Zod, Vitest and ESLint. The test suite
+mocks every external service and never sends real email.
 
-## Security notes
+## Security
 
-- All credentials are held server-side and are not committed to the repository.
+- Credentials are kept server-side and are never committed to the repository.
 - Scheduled and manual triggers are authenticated, and recipients are fixed in
   server-side configuration.
 - Email content is escaped, and only validated HTTP(S) source links are rendered.
-
-## Status
-
-Under active, personal development. It is built for one user's needs and is
-not production-ready software for general use.

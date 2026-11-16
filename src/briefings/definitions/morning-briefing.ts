@@ -9,6 +9,11 @@ export const morningMarketsSection = {
   assetIds: [...marketAssetIds],
 } satisfies SectionOfKind<"markets">;
 
+export const morningCareerSections = [
+  { id: "engineering-jobs", kind: "jobs", title: "New Engineering Jobs", provider: "career-jobs", maxJobs: 10, windowHours: 24 },
+  { id: "ai-engineering", kind: "engineering", title: "AI Engineering Updates", provider: "github-releases", maxUpdates: 3, windowHours: 24 },
+] satisfies (SectionOfKind<"jobs"> | SectionOfKind<"engineering">)[];
+
 export const morningBriefing = {
   id: "morning-briefing",
   name: "Morning Briefing",

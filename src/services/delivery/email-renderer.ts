@@ -2,6 +2,8 @@ import { SafeError, type BriefingModel, type BriefingSectionResult } from "@/typ
 import { addDays, localDate, startOfLocalDay } from "@/lib/date";
 import { marketAssets } from "@/config/market-assets";
 import { marketAssetResultSchema } from "@/types/markets";
+import { engineeringUpdateSchema, jobGroupSchema } from "@/types/career";
+import { hybridJobSearch, jobSearchPreferences } from "@/config/job-search";
 import type { HourlyWeatherForecast } from "@/types/weather";
 
 function escape(value: string): string {
@@ -54,15 +56,18 @@ interface EmailItem {
   text: string;
   url?: string;
   compact?: boolean;
+  caption?: boolean;
   market?: MarketCard;
   hours?: HourlyWeatherForecast[];
   weather?: { locationId: string; location: string; summary: string; pills: string[]; hourlyUnavailableReason?: string };
   calendar?: { text: string; name?: string; color?: string };
   news?: { title: string; description?: string; publisher: string; published: string };
+  career?: { title: string; subtitle?: string; details: string[]; action: string };
+  notice?: boolean;
 }
 
 function sectionTitle(section: BriefingSectionResult): string {
-  const emoji = { calendar: "📅", weather: "🌤️", news: "📰", markets: "💰" }[section.kind];
+  const emoji = { calendar: "📅", weather: "🌤️", news: "📰", markets: "💰", jobs: "💼", engineering: "🤖" }[section.kind];
   return `${emoji} ${section.title}`;
 }
 
@@ -77,6 +82,75 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
     timeZone: briefing.timezone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   }).format(new Date(value));
   switch (section.kind) {
+    case "jobs": {
+      if (!jobGroupSchema.array().safeParse(section.outcome.data).success) throw new SafeError("Email contains invalid job data");
+      const rows: EmailItem[] = [];
+      for (const workplace of ["hybrid", "remote"] as const) {
+        rows.push({ text: workplace === "hybrid" ? `Hybrid — ${hybridJobSearch.locations.join(" / ")}` : "Fully Remote — UK" });
+        const group = section.outcome.data.find((item) => item.workplace === workplace);
+        if (!group || group.status === "unavailable") {
+          rows.push({ text: `Coverage unavailable: ${group?.reason ?? "Group omitted by provider"}`, notice: true });
+          continue;
+        }
+        if (group.status === "partial") rows.push({ text: `Coverage incomplete: ${group.reason}`, notice: true });
+        if (!group.jobs.length) rows.push({ text: workplace === "hybrid"
+          ? "No hybrid jobs selected for today or yesterday (date-only postings)."
+          : "No remote jobs selected from the accessible last-24-hour window." });
+        for (const job of group.jobs) {
+          const salary = job.salary;
+          const level = job.seniority ? {
+            "mid-level": "Mid-level target", senior: "Senior — stretch opportunity", unspecified: "Level not specified",
+          }[job.seniority] : undefined;
+          const money = (value: number) => new Intl.NumberFormat("en-GB", {
+            style: "currency", currency: salary?.currency ?? "GBP", maximumFractionDigits: 2,
+          }).format(value);
+          let pay = "Salary not disclosed";
+          if (salary) {
+            if (salary.minimum !== undefined && salary.maximum !== undefined) pay = `${money(salary.minimum)}–${money(salary.maximum)}`;
+            else if (salary.minimum !== undefined) pay = `From ${money(salary.minimum)}`;
+            else if (salary.maximum !== undefined) pay = `Up to ${money(salary.maximum)}`;
+            else throw new SafeError("Email contains invalid salary data");
+            pay += ` (${salary.period})`;
+          }
+          const details = [
+            `Location: ${job.location} | ${workplace === "remote" ? "Remote as listed by source" : "Hybrid"}`,
+            `Employment: ${job.contractType ? "Permanent" : "Permanent unconfirmed"} | ${job.jobType ? "Full-time" : "Full-time unconfirmed"}`,
+            ...(!salary || salary.currency !== "GBP" || salary.period !== "yearly" || salary.minimum === undefined
+              ? [`Salary fit: GBP ${jobSearchPreferences.minimumAnnualSalaryGBP.toLocaleString("en-GB")}/year minimum unconfirmed`] : []),
+            ...(job.skills.length ? [`Matched skills: ${job.skills.join(", ")}`] : []),
+            ...(job.excerpt ? [`Listing excerpt: ${job.excerpt}`] : []),
+            `Source: ${job.source} | Posted: ${job.publishedAt !== undefined ? dateTime(job.publishedAt)
+              : `${job.publishedDate} (date only; posting time unavailable)`}`,
+          ];
+          rows.push({
+            text: `${job.title} — ${job.company}\n${pay}${level ? `\nLevel: ${level} (based on title/source level)` : ""}\n${details.join("\n")}`,
+            url: sourceUrl(job.url),
+            career: { title: job.title, subtitle: `${job.company} | ${pay}${level ? ` | ${level}` : ""}`, details, action: `View job at ${job.source}` },
+          });
+        }
+      }
+      if (section.outcome.notice) rows.push({ text: section.outcome.notice, caption: true });
+      return rows;
+    }
+    case "engineering": {
+      if (!engineeringUpdateSchema.array().safeParse(section.outcome.data).success) throw new SafeError("Email contains invalid engineering data");
+      const rows: EmailItem[] = section.outcome.data.map((update) => {
+        const title = `${update.source}: ${update.title}`;
+        const details = [`Version: ${update.version}`, `Source: ${update.source} on GitHub | Released: ${dateTime(update.publishedAt)}`];
+        return {
+          text: `${title}\n${details.join("\n")}`, url: sourceUrl(update.url),
+          career: { title, details, action: "Official release notes" },
+        };
+      });
+      if (!rows.length) rows.push({ text: "No matching stable releases in the last 24 hours from available sources." });
+      if (section.outcome.status === "partial") {
+        rows.push(...section.outcome.unavailableSources.map((source) => ({
+          text: `${source.source} unavailable: ${source.reason}`, notice: true,
+        })));
+      }
+      rows.push({ text: "Official GitHub releases only; API-only model announcements and proprietary tool changelogs are not covered yet. No prereleases or generated summaries." });
+      return rows;
+    }
     case "calendar": {
       const failures = section.outcome.status === "partial"
         ? section.outcome.unavailableCalendars.map((calendar) => ({
@@ -323,7 +397,7 @@ function renderDisclosure(id: string, title: string, content: string, name: stri
   // Content stays visible unless the client retains both the input and interactive CSS.
   return `<div class="disclosure">
 <input class="disclosure-toggle" type="checkbox" id="${id}" aria-label="Show details for ${escape(name)}" aria-controls="${id}-content" style="display:none;mso-hide:all">
-<label class="disclosure-heading" for="${id}" style="display:block;min-height:44px;box-sizing:border-box;padding:12px 0;color:#f4f8ff;line-height:1.5;overflow-wrap:anywhere">${title}<span class="disclosure-indicator" aria-hidden="true" style="display:none"></span></label>
+<label class="disclosure-heading" for="${id}" style="display:block;padding:12px 0;color:#f4f8ff;line-height:1.5;overflow-wrap:anywhere">${title}<span class="disclosure-indicator" aria-hidden="true" style="display:none"></span></label>
 <div class="disclosure-content" id="${id}-content" style="padding-top:12px">${content}</div>
 </div>`;
 }
@@ -405,18 +479,29 @@ ${market.range ? `<table role="presentation" width="100%" style="width:100%;tabl
 }
 
 function renderItems(section: BriefingSectionResult, items: EmailItem[], timezone: string, sectionIndex: number): string {
-  if (section.kind === "news") {
+  if (section.kind === "news" || section.kind === "jobs" || section.kind === "engineering") {
     return `<table role="presentation" width="100%" style="width:100%">${items.map((item, index) => {
-      if (!item.news || !item.url) {
-        return `<tr><td class="muted" style="padding:0 0 12px;color:#adbed0;font-size:13px;line-height:1.6">${escape(item.text)}</td></tr>`;
+      if ((!item.news && !item.career) || !item.url) {
+        return `<tr><td class="${item.notice ? "notice" : "muted"}${item.caption ? " career-caption" : ""}" style="padding:0 0 ${item.caption ? "0" : "12px"};color:${item.notice ? "#ffd28c" : "#adbed0"};font-size:${item.caption ? "10px" : "13px"};line-height:${item.caption ? "1.4" : "1.6"}">${escape(item.text)}</td></tr>`;
       }
+      if (item.career) {
+        return `<tr><td style="padding:12px 0;border-top:1px solid #34495c;overflow-wrap:anywhere">${renderDisclosure(
+          `c${sectionIndex}-${index}`,
+          `<strong style="font-size:17px">${escape(item.career.title)}</strong>${
+            item.career.subtitle ? `<br><small>${escape(item.career.subtitle)}</small>` : ""
+          }`,
+          `<p style="margin:0 0 12px;font-size:13px;line-height:1.6">${item.career.details.map(escape).join("<br>")}</p><a class="link" href="${escape(item.url)}" style="display:inline-block;padding:12px 0;line-height:20px;color:#a6e2ff">${escape(item.career.action)} &nearr;</a>`,
+          item.career.title,
+        )}</td></tr>`;
+      }
+      const title = item.news?.title ?? item.text;
       return `<tr><td class="rule" style="padding:20px 0;border-bottom:1px solid #34495c;overflow-wrap:anywhere">
 ${renderDisclosure(`disclosure-${sectionIndex}-${index}`,
-    `<span class="heading" role="heading" aria-level="3" style="font-size:18px;font-weight:600;letter-spacing:-0.3px">${escape(item.news.title)}</span>`,
-    `${item.news.description ? `<p class="copy" style="margin:0 0 12px;color:#e3edf8;font-size:14px;line-height:1.7"><span class="muted" style="color:#adbed0;font-size:11px">Publisher excerpt:</span> ${escape(item.news.description)}</p>` : ""}
-<p class="muted" style="margin:0 0 14px;color:#adbed0;font-size:12px;line-height:1.6">Source: ${escape(item.news.publisher)} | Published: ${escape(item.news.published)}</p>
+    `<span class="heading" role="heading" aria-level="3" style="font-size:18px;font-weight:600;letter-spacing:-0.3px">${escape(title)}</span>`,
+    `${item.news?.description ? `<p class="copy" style="margin:0 0 12px;color:#e3edf8;font-size:14px;line-height:1.7"><span class="muted" style="color:#adbed0;font-size:11px">Publisher excerpt:</span> ${escape(item.news.description)}</p>` : ""}
+${item.news ? `<p class="muted" style="margin:0 0 14px;color:#adbed0;font-size:12px;line-height:1.6">Source: ${escape(item.news.publisher)} | Published: ${escape(item.news.published)}</p>` : ""}
 <a class="link glass-action" href="${escape(item.url)}" style="display:inline-block;min-height:44px;box-sizing:border-box;padding:12px 18px;border:1px solid #4d718c;border-radius:99px;background-color:#203e55;color:#a6e2ff;font-size:13px;font-weight:600;line-height:20px;text-decoration:underline;box-shadow:inset 0 1px 0 rgba(255,255,255,0.18)">Read more <span aria-hidden="true">&nearr;</span></a>`,
-    item.news.title)}
+    title)}
 </td></tr>`;
     }).join("")}</table>`;
   }
@@ -487,7 +572,7 @@ a { text-decoration: underline; text-underline-offset: 3px; }
 .glass-action { color: #eaf7ff !important; }
 @supports (-webkit-appearance: none) {
   .disclosure-toggle { display: block !important; position: absolute; width: 1px; height: 1px; padding: 0; margin: 0; opacity: 0; clip-path: inset(50%); }
-  .disclosure-toggle + .disclosure-heading { position: relative; min-height: 68px !important; padding-right: 60px !important; cursor: pointer; }
+  .disclosure-toggle + .disclosure-heading { position: relative; box-sizing: border-box; min-height: 68px !important; padding-right: 60px !important; cursor: pointer; }
   .disclosure-toggle:not(:checked) + .disclosure-heading + .disclosure-content { display: none !important; }
   .disclosure-toggle + .disclosure-heading .disclosure-indicator { display: block !important; position: absolute; right: 0; top: 50%; margin-top: -22px; box-sizing: border-box; width: 44px; height: 44px; border: 1px solid #4d718c; border-radius: 14px; background-color: #203e55; color: #b5e7ff; font-size: 32px; font-weight: 400; line-height: 40px; text-align: center; }
   .disclosure-toggle + .disclosure-heading .disclosure-indicator::after { content: "+"; }
@@ -546,7 +631,7 @@ a { text-decoration: underline; text-underline-offset: 3px; }
 ${sections.map(({ section, items }, index) => {
   const accent = section.outcome.status === "unavailable" ? "#ffd28c" : "#90d9ff";
   return `<tr><td class="glass card" style="padding:28px 30px;background-color:#112537;border:1px solid #4b657b;border-radius:28px">
-<p class="muted" style="margin:0 0 12px;color:#adbed0;font-family:'SFMono-Regular',Consolas,monospace;font-size:10px;font-weight:500;letter-spacing:2px;text-transform:uppercase"><span style="color:${accent}">${String(index + 1).padStart(2, "0")}</span> &nbsp;/&nbsp; ${section.kind === "markets" ? "MARKET SNAPSHOT" : section.kind === "calendar" ? "YOUR SCHEDULE" : section.kind === "weather" ? "LOCAL OUTLOOK" : "THE HEADLINES"}</p>
+<p class="muted" style="margin:0 0 12px;color:#adbed0;font-family:'SFMono-Regular',Consolas,monospace;font-size:10px;font-weight:500;letter-spacing:2px;text-transform:uppercase"><span style="color:${accent}">${String(index + 1).padStart(2, "0")}</span> &nbsp;/&nbsp; ${section.kind === "markets" ? "MARKET SNAPSHOT" : section.kind === "calendar" ? "YOUR SCHEDULE" : section.kind === "weather" ? "LOCAL OUTLOOK" : section.kind === "jobs" || section.kind === "engineering" ? "CAREER &amp; ENGINEERING" : "THE HEADLINES"}</p>
 <h2 class="heading section-heading" style="margin:0 0 20px;color:#f4f8ff;font-size:26px;font-weight:600;letter-spacing:-0.7px;line-height:1.25">${escape(sectionTitle(section))}</h2>
 ${renderItems(section, items, briefing.timezone, index)}
 </td></tr><tr><td style="height:16px;font-size:1px;line-height:16px">&nbsp;</td></tr>`;

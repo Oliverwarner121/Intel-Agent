@@ -11,8 +11,12 @@ import { withMetOfficeWarnings } from "@/services/providers/weather/met-office-w
 import { createTwelveDataProvider } from "@/services/providers/markets/twelve-data.provider";
 import { createGNewsProvider } from "@/services/providers/news/gnews.provider";
 import { getBriefingDefinition } from "@/briefings/registry";
-import { morningMarketsSection } from "@/briefings/definitions/morning-briefing";
+import { morningCareerSections, morningMarketsSection } from "@/briefings/definitions/morning-briefing";
 import { SafeError } from "@/types/briefing";
+import { createJobicyProvider } from "@/services/providers/jobs/jobicy.provider";
+import { createGitHubReleasesProvider } from "@/services/providers/engineering/github-releases.provider";
+import { createJobsProvider } from "@/services/providers/jobs/jobs.provider";
+import { createReedProvider } from "@/services/providers/jobs/reed.provider";
 
 /**
  * Production wiring of providers and delivery. A provider is registered only
@@ -31,14 +35,24 @@ export function createBriefingDependencies(env: ServerEnv): OrchestratorDependen
     if (!env.TWELVE_DATA_API_KEY) throw new SafeError("TWELVE_DATA_API_KEY is required when markets are enabled");
     providers.markets = { "twelve-data": createTwelveDataProvider(env.TWELVE_DATA_API_KEY) };
   }
+  if (env.CAREER_INTEL_ENABLED === "true") {
+    providers.jobs = { "career-jobs": createJobsProvider(
+      createJobicyProvider(), env.REED_API_KEY ? createReedProvider(env.REED_API_KEY) : undefined,
+    ) };
+    providers.engineering = { "github-releases": createGitHubReleasesProvider() };
+  }
 
   return {
     providers,
-    ...(env.MARKETS_ENABLED === "true" ? {
+    ...(env.MARKETS_ENABLED === "true" || env.CAREER_INTEL_ENABLED === "true" ? {
       getDefinition: (id: string) => {
         const definition = getBriefingDefinition(id);
         return definition?.id === "morning-briefing"
-          ? { ...definition, sections: [...definition.sections, morningMarketsSection] }
+          ? { ...definition, sections: [
+            ...definition.sections,
+            ...(env.MARKETS_ENABLED === "true" ? [morningMarketsSection] : []),
+            ...(env.CAREER_INTEL_ENABLED === "true" ? morningCareerSections : []),
+          ] }
           : definition;
       },
     } : {}),

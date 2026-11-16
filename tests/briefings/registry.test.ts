@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { morningBriefing } from "@/briefings/definitions/morning-briefing";
+import { morningBriefing, morningCareerSections } from "@/briefings/definitions/morning-briefing";
+import { briefingSectionSchema } from "@/briefings/briefing.types";
 import { createRegistry, getBriefingDefinition, listBriefingDefinitions } from "@/briefings/registry";
 
 const vercelConfig = z
@@ -9,6 +10,14 @@ const vercelConfig = z
   .parse(JSON.parse(readFileSync("vercel.json", "utf8")));
 
 describe("briefing registry", () => {
+  it("validates optional career sections with fixed freshness and bounded selection", () => {
+    for (const section of morningCareerSections) {
+      expect(briefingSectionSchema.safeParse(section).success).toBe(true);
+      expect(briefingSectionSchema.safeParse({ ...section, windowHours: 48 }).success).toBe(false);
+    }
+    expect(briefingSectionSchema.safeParse({ ...morningCareerSections[0], maxJobs: 11 }).success).toBe(false);
+    expect(briefingSectionSchema.safeParse({ ...morningCareerSections[1], maxUpdates: 4 }).success).toBe(false);
+  });
   it("registers the morning briefing with sections in the required order", () => {
     const definition = getBriefingDefinition("morning-briefing");
     expect(definition?.timezone).toBe("Europe/London");

@@ -5,6 +5,7 @@ import { localDayPeriod, rollingPeriod } from "@/lib/date";
 import { HttpError } from "@/lib/http";
 import { logger } from "@/lib/logger";
 import { marketAssetResultSchema } from "@/types/markets";
+import { engineeringUpdateSchema, jobGroupSchema } from "@/types/career";
 import {
   SafeError,
   type BriefingDelivery,
@@ -88,6 +89,10 @@ function unavailable(section: BriefingSection, reason: string): BriefingSectionR
       return { ...base, kind: "news", outcome };
     case "markets":
       return { ...base, kind: "markets", outcome };
+    case "jobs":
+      return { ...base, kind: "jobs", outcome };
+    case "engineering":
+      return { ...base, kind: "engineering", outcome };
   }
 }
 
@@ -104,6 +109,45 @@ async function collectSection(
   const base = { id: section.id, title: section.title };
   try {
     switch (section.kind) {
+      case "jobs": {
+        const provider = providers.jobs?.[section.provider];
+        if (!provider) return notConfigured(section);
+        const response = await withTimeout((signal) => provider({
+          ...context, signal, maxJobs: section.maxJobs, window: rollingPeriod(context.now, section.windowHours),
+        }), timeoutMs);
+        const parsed = jobGroupSchema.array().length(2).safeParse(response.groups);
+        if (!parsed.success || new Set(parsed.data.map((group) => group.workplace)).size !== 2 ||
+          parsed.data.some((group) => group.status !== "unavailable" && group.jobs.some((job) => job.workplace !== group.workplace))) {
+          throw new SafeError("Jobs provider returned invalid groups");
+        }
+        let remaining = section.maxJobs;
+        const data = (["hybrid", "remote"] as const).map((workplace) => {
+          const group = parsed.data.find((item) => item.workplace === workplace);
+          if (!group) throw new SafeError("Jobs provider omitted a group");
+          if (group.status === "unavailable") return group;
+          const jobs = group.jobs.slice(0, remaining);
+          remaining -= jobs.length;
+          return { ...group, jobs };
+        });
+        if (data.every((group) => group.status === "unavailable")) return unavailable(section, "All job groups are unavailable");
+        return { ...base, kind: "jobs", outcome: {
+          status: data.some((group) => group.status !== "ok") ? "partial" : "ok",
+          data, notice: response.notice,
+        } };
+      }
+      case "engineering": {
+        const provider = providers.engineering?.[section.provider];
+        if (!provider) return notConfigured(section);
+        const response = await withTimeout((signal) => provider({
+          ...context, signal, maxUpdates: section.maxUpdates, window: rollingPeriod(context.now, section.windowHours),
+        }), timeoutMs);
+        const parsed = engineeringUpdateSchema.array().safeParse(response.updates);
+        if (!parsed.success) throw new SafeError("Engineering provider returned invalid updates");
+        const data = parsed.data.slice(0, section.maxUpdates);
+        return { ...base, kind: "engineering", outcome: response.unavailableSources.length
+          ? { status: "partial", data, unavailableSources: response.unavailableSources }
+          : { status: "ok", data } };
+      }
       case "calendar": {
         const provider = providers.calendar[section.provider];
         if (!provider) return notConfigured(section);
@@ -293,6 +337,12 @@ export function summariseRun(run: BriefingRunResult) {
                 ...(asset.status === "unavailable" ? { reason: asset.reason } : {}),
               })),
             }
+            : section.kind === "jobs"
+              ? { id: section.id, status: section.outcome.status,
+                items: section.outcome.data.reduce((count, group) => count + (group.status !== "unavailable" ? group.jobs.length : 0), 0) }
+            : section.kind === "engineering" && section.outcome.status === "partial"
+              ? { id: section.id, status: "partial" as const, items: section.outcome.data.length,
+                unavailableSources: section.outcome.unavailableSources.length }
             : section.kind === "calendar" && section.outcome.status === "partial"
               ? { id: section.id, status: "partial" as const, items: section.outcome.data.length,
                 unavailableCalendars: section.outcome.unavailableCalendars.length }

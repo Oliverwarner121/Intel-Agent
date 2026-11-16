@@ -45,6 +45,15 @@ describe("getServerEnv market settings", () => {
     expect(getServerEnv({ CRON_SECRET: secret, TWELVE_DATA_API_KEY: " key " }).TWELVE_DATA_API_KEY).toBe("key");
   });
 
+  describe("getServerEnv career settings", () => {
+    it("accepts explicit opt-in or opt-out without credentials and rejects ambiguous switches", () => {
+      for (const flag of ["true", "false"]) {
+        expect(getServerEnv({ CRON_SECRET: secret, CAREER_INTEL_ENABLED: flag }).CAREER_INTEL_ENABLED).toBe(flag);
+      }
+      expect(() => getServerEnv({ CRON_SECRET: secret, CAREER_INTEL_ENABLED: "yes" })).toThrow("CAREER_INTEL_ENABLED");
+    });
+  });
+
   it("requires a key when enabled and validates the switch without exposing values", () => {
     expect(() => getServerEnv({ CRON_SECRET: secret, MARKETS_ENABLED: "true" })).toThrow("TWELVE_DATA_API_KEY");
     expect(() => getServerEnv({ CRON_SECRET: secret, MARKETS_ENABLED: "yes" })).toThrow("MARKETS_ENABLED");

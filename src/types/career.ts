@@ -43,14 +43,23 @@ export const jobGroupSchema = z.discriminatedUnion("status", [
   z.object({ workplace: z.enum(["hybrid", "remote"]), status: z.literal("unavailable"), reason: text }),
 ]);
 
-export const engineeringUpdateSchema = z.object({
+const engineeringUpdateBase = {
   id: text,
   title: text,
   source: text,
-  version: text,
   publishedAt: z.iso.datetime({ offset: true }),
   url: sourceUrl,
-});
+};
+export const engineeringUpdateSchema = z.discriminatedUnion("kind", [
+  z.object({
+    ...engineeringUpdateBase, kind: z.literal("release"),
+    category: z.enum(["tools", "frameworks"]), version: text,
+  }),
+  z.object({
+    ...engineeringUpdateBase, kind: z.literal("announcement"),
+    category: z.enum(["models", "tools"]),
+  }),
+]);
 
 export type JobListing = z.infer<typeof jobListingSchema>;
 export type JobGroup = z.infer<typeof jobGroupSchema>;

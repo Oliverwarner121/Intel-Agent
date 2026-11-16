@@ -1,6 +1,7 @@
 import { addDays, localDate, type ReportingPeriod } from "@/lib/date";
 import { jobSearchPreferences } from "@/config/job-search";
-import type { JobListing } from "@/types/career";
+import { engineeringCategories } from "@/config/engineering-sources";
+import type { EngineeringUpdate, JobListing } from "@/types/career";
 import { SafeError } from "@/types/briefing";
 
 const skills = [
@@ -111,4 +112,32 @@ export function selectJobs(
     seenRoles.add(role);
     return true;
   }).slice(0, maximum);
+}
+
+export function selectEngineeringUpdates(
+  updates: EngineeringUpdate[], window: ReportingPeriod, maximum: number,
+): EngineeringUpdate[] {
+  const ids = new Set<string>();
+  const urls = new Set<string>();
+  const products = new Set<string>();
+  const eligible = updates.filter((update) => {
+    const at = Date.parse(update.publishedAt);
+    return at >= window.start.getTime() && at < window.end.getTime();
+  }).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id))
+    .filter((update) => {
+      const product = `${update.category}/${update.source}`;
+      const url = new URL(update.url);
+      url.hash = "";
+      if (ids.has(update.id) || urls.has(url.href) || products.has(product)) return false;
+      ids.add(update.id);
+      urls.add(url.href);
+      products.add(product);
+      return true;
+    });
+  const firstInEachCategory = engineeringCategories.flatMap(({ id }) => {
+    const first = eligible.find((update) => update.category === id);
+    return first ? [first] : [];
+  });
+  const firstIds = new Set(firstInEachCategory.map((update) => update.id));
+  return [...firstInEachCategory, ...eligible.filter((update) => !firstIds.has(update.id))].slice(0, maximum);
 }

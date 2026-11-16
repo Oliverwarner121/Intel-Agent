@@ -10,7 +10,7 @@ import { runBriefing, summariseRun } from "@/services/orchestration/briefing-orc
 import { renderBriefingEmail } from "@/services/delivery/email-renderer";
 import { matchJobEmployment, matchesJobSalary, matchingJobSkills } from "@/services/processing/career-selection";
 import type { BriefingModel, EngineeringProvider, JobsProvider } from "@/types/briefing";
-import type { JobListing } from "@/types/career";
+import type { EngineeringUpdate, JobListing } from "@/types/career";
 
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 const now = new Date("2026-11-16T10:00:00Z");
@@ -71,7 +71,7 @@ describe("Jobicy UK jobs", () => {
     for (const output of [html, text]) {
       expect(output).toContain("Employment: Permanent | Full-time");
       expect(output).toContain("Permanent unconfirmed | Full-time");
-      expect(output).toContain("GBP 48,000/year minimum unconfirmed");
+      expect(output).toContain("£48,000/year minimum unconfirmed");
     }
   });
 
@@ -254,7 +254,7 @@ describe("official engineering releases", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(engineeringSources.length);
     expect(result.updates).toHaveLength(3);
     expect(new Set(result.updates.map((update) => update.source)).size).toBe(3);
-    expect(result.updates.every((update) => update.version === "v1.1")).toBe(true);
+    expect(result.updates.every((update) => update.kind === "release" && update.version === "v1.1")).toBe(true);
     expect(result.unavailableSources).toEqual([{ source: "VS Code", reason: "GitHub releases request failed (HTTP 403)" }]);
   });
 
@@ -273,7 +273,7 @@ describe("official engineering releases", () => {
 });
 
 describe("career orchestration and email", () => {
-  it("keeps a fully populated email with ten jobs and three releases below 100 KiB", () => {
+  it("keeps a fully populated email with ten jobs and all three engineering categories below 100 KiB", () => {
     const jobs = Array.from({ length: 10 }, (_, index): JobListing => ({
       id: `${index < 5 ? "reed:" : ""}${index}`, seniority: "mid-level",
       title: "Mid-level Full Stack TypeScript and AI Software Engineer",
@@ -324,10 +324,17 @@ describe("career orchestration and email", () => {
           { workplace: "remote", status: "ok", jobs: jobs.slice(5) },
         ], notice: "Reed: today/yesterday · Jobicy: 24h (3h delay)" } },
         { id: "engineering", kind: "engineering", title: "AI Engineering Updates", outcome: { status: "ok",
-          data: engineeringSources.slice(0, 3).map((source) => ({
+          data: [{
+            id: "copilot-model", kind: "announcement", category: "models", source: "GitHub Copilot",
+            title: "Model availability and developer access updates in GitHub Copilot",
+            publishedAt: "2026-11-16T06:00:00Z",
+            url: "https://github.blog/changelog/2026-11-16-model-availability",
+          }, ...engineeringSources.filter((source) => ["microsoft/vscode", "langchain-ai/langgraph"].includes(source.repo))
+            .map((source): EngineeringUpdate => ({
             id: source.repo, source: source.name, title: "Official product release with developer tooling updates",
+            kind: "release", category: source.category,
             version: "v1.2.3", publishedAt: "2026-11-16T06:00:00Z", url: `https://github.com/${source.repo}/releases/tag/v1.2.3`,
-          })),
+          }))],
         } },
       ],
     };
@@ -359,7 +366,7 @@ describe("career orchestration and email", () => {
       ], notice: "Jobicy: 3-hour delay.",
     });
     const engineering = vi.fn<EngineeringProvider>().mockResolvedValue({
-      updates: [{ id: "release", title: "Version 1", source: "VS Code", version: "v1",
+      updates: [{ id: "release", kind: "release", category: "tools", title: "Version 1", source: "VS Code", version: "v1",
         publishedAt: "2026-11-16T06:00:00Z", url: "https://github.com/microsoft/vscode/releases/tag/v1" }],
       unavailableSources: [{ source: "Other", reason: "Source request failed" }],
     });
@@ -370,7 +377,7 @@ describe("career orchestration and email", () => {
         if (!definition) throw new Error("Missing definition");
         return { ...definition, sections: morningCareerSections };
       },
-      providers: { calendar: {}, weather: {}, news: {}, jobs: { "career-jobs": jobs }, engineering: { "github-releases": engineering } },
+      providers: { calendar: {}, weather: {}, news: {}, jobs: { "career-jobs": jobs }, engineering: { "engineering-updates": engineering } },
     });
     expect(run.status).toBe("completed-with-gaps");
     expect(jobs.mock.calls[0]?.[0]).toMatchObject({ window: context().window, maxJobs: 10 });
@@ -384,7 +391,7 @@ describe("career orchestration and email", () => {
       expect(output).toContain("Salary not disclosed");
       expect(output).toContain("Permanent unconfirmed");
       expect(output).toContain("Full-time unconfirmed");
-      expect(output).toContain("GBP 48,000/year minimum unconfirmed");
+      expect(output).toContain("£48,000/year minimum unconfirmed");
       expect(output).toContain("Source: Jobicy");
       expect(output).toContain("Senior — stretch opportunity");
       expect(output).toContain("Hybrid source not configured");

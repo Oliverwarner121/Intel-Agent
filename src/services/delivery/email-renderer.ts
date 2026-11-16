@@ -4,6 +4,7 @@ import { marketAssets } from "@/config/market-assets";
 import { marketAssetResultSchema } from "@/types/markets";
 import { engineeringUpdateSchema, jobGroupSchema } from "@/types/career";
 import { hybridJobSearch, jobSearchPreferences } from "@/config/job-search";
+import { engineeringCategories } from "@/config/engineering-sources";
 import type { HourlyWeatherForecast } from "@/types/weather";
 
 function escape(value: string): string {
@@ -101,9 +102,11 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
           const level = job.seniority ? {
             "mid-level": "Mid-level target", senior: "Senior — stretch opportunity", unspecified: "Level not specified",
           }[job.seniority] : undefined;
-          const money = (value: number) => new Intl.NumberFormat("en-GB", {
-            style: "currency", currency: salary?.currency ?? "GBP", maximumFractionDigits: 2,
-          }).format(value);
+          const symbols: Record<string, string> = { GBP: "£", USD: "$" };
+          const currency = salary?.currency ?? "GBP";
+          const money = (value: number) => `${symbols[currency] ?? `${currency} `}${new Intl.NumberFormat("en-GB", {
+            maximumFractionDigits: 2,
+          }).format(value)}`;
           let pay = "Salary not disclosed";
           if (salary) {
             if (salary.minimum !== undefined && salary.maximum !== undefined) pay = `${money(salary.minimum)}–${money(salary.maximum)}`;
@@ -116,7 +119,7 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
             `Location: ${job.location} | ${workplace === "remote" ? "Remote as listed by source" : "Hybrid"}`,
             `Employment: ${job.contractType ? "Permanent" : "Permanent unconfirmed"} | ${job.jobType ? "Full-time" : "Full-time unconfirmed"}`,
             ...(!salary || salary.currency !== "GBP" || salary.period !== "yearly" || salary.minimum === undefined
-              ? [`Salary fit: GBP ${jobSearchPreferences.minimumAnnualSalaryGBP.toLocaleString("en-GB")}/year minimum unconfirmed`] : []),
+              ? [`Salary fit: £${jobSearchPreferences.minimumAnnualSalaryGBP.toLocaleString("en-GB")}/year minimum unconfirmed`] : []),
             ...(job.skills.length ? [`Matched skills: ${job.skills.join(", ")}`] : []),
             ...(job.excerpt ? [`Listing excerpt: ${job.excerpt}`] : []),
             `Source: ${job.source} | Posted: ${job.publishedAt !== undefined ? dateTime(job.publishedAt)
@@ -134,21 +137,30 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
     }
     case "engineering": {
       if (!engineeringUpdateSchema.array().safeParse(section.outcome.data).success) throw new SafeError("Email contains invalid engineering data");
-      const rows: EmailItem[] = section.outcome.data.map((update) => {
-        const title = `${update.source}: ${update.title}`;
-        const details = [`Version: ${update.version}`, `Source: ${update.source} on GitHub | Released: ${dateTime(update.publishedAt)}`];
-        return {
-          text: `${title}\n${details.join("\n")}`, url: sourceUrl(update.url),
-          career: { title, details, action: "Official release notes" },
-        };
-      });
-      if (!rows.length) rows.push({ text: "No matching stable releases in the last 24 hours from available sources." });
+      const rows: EmailItem[] = [];
+      for (const category of engineeringCategories) {
+        const updates = section.outcome.data.filter((update) => update.category === category.id);
+        rows.push({ text: `${category.name}${updates.length ? "" : " - none selected (24h)."}` });
+        for (const update of updates) {
+          const title = `${update.source}: ${update.title}`;
+          const details = [
+            ...(update.category === "models" ? ["Type: Copilot availability update, not a vendor model launch"] : []),
+            ...(update.kind === "release" ? [`Version: ${update.version}`] : []),
+            `Source: ${update.source} | Published: ${dateTime(update.publishedAt)}`,
+          ];
+          const action = update.kind === "release" ? "Official release notes" : "Official announcement";
+          rows.push({
+            text: `${title}\n${details.join("\n")}`, url: sourceUrl(update.url),
+            career: { title, details, action },
+          });
+        }
+      }
       if (section.outcome.status === "partial") {
         rows.push(...section.outcome.unavailableSources.map((source) => ({
           text: `${source.source} unavailable: ${source.reason}`, notice: true,
         })));
       }
-      rows.push({ text: "Official GitHub releases only; API-only model announcements and proprietary tool changelogs are not covered yet. No prereleases or generated summaries." });
+      rows.push({ text: "24h · Models: Copilot availability, not vendor launches. No Cursor/Windsurf or generated summaries.", caption: true });
       return rows;
     }
     case "calendar": {
@@ -246,36 +258,14 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
               url: sourceUrl(warning.url),
             });
           }
-          rows.push(
-            { text: "Warnings: Met Office", url: "https://weather.metoffice.gov.uk/warnings-and-advice/uk-warnings", compact: true },
-            { text: "Contains public sector information licensed under the Open Government Licence v3.0",
-              url: "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/", compact: true },
-          );
         }
       }
-      for (const [checkedAt, regions] of emptyRegions) {
-        rows.push({
-          text: `Met Office regional warnings - ${regions.join("; ")}. No warnings listed in ${
-            regions.length === 1 ? "this regional feed" : "these regional feeds"
-          } when checked ${dateTime(checkedAt)}. Regional coverage may not affect your exact location.`,
-        });
+      const emptyList = [...emptyRegions.values()].flat();
+      if (emptyList.length > 0) {
+        rows.push({ text: emptyList.length === seenRegions.size ? "No weather warnings for today" : `No warnings listed for ${emptyList.join("; ")}.` });
       }
       if (section.outcome.data.some((location) => !location.warnings)) {
         rows.push({ text: "Official weather warnings are not supplied by this forecast provider." });
-      }
-      const credits = new Set<string>();
-      for (const forecast of section.outcome.data) {
-        if ("unavailableReason" in forecast || !forecast.attribution) continue;
-        const attribution = forecast.attribution;
-        const url = sourceUrl(attribution.url);
-        const licenceUrl = sourceUrl(attribution.licenceUrl);
-        const key = `${attribution.name}/${url}/${licenceUrl}`;
-        if (credits.has(key)) continue;
-        credits.add(key);
-        rows.push(
-          { text: `Weather: ${attribution.name} (condition codes converted to text)`, url, compact: true },
-          { text: "CC BY 4.0", url: licenceUrl, compact: true },
-        );
       }
       return rows;
     }
@@ -359,7 +349,6 @@ function sectionItems(section: BriefingSectionResult, briefing: BriefingModel): 
           });
         }
       }
-      rows.push({ text: "Point-in-time snapshots, not a live feed. For personal informational use only." });
       return rows;
     }
     case "news": {
@@ -393,10 +382,10 @@ function renderHourly(hours: HourlyWeatherForecast[], timezone: string): string 
   return `<table role="presentation" width="100%" style="width:100%;table-layout:fixed">${rows.join("")}</table>`;
 }
 
-function renderDisclosure(id: string, title: string, content: string, name: string): string {
+function renderDisclosure(id: string, title: string, content: string, name?: string): string {
   // Content stays visible unless the client retains both the input and interactive CSS.
   return `<div class="disclosure">
-<input class="disclosure-toggle" type="checkbox" id="${id}" aria-label="Show details for ${escape(name)}" aria-controls="${id}-content" style="display:none;mso-hide:all">
+<input class="disclosure-toggle" type="checkbox" id="${id}"${name === undefined ? "" : ` aria-label="Show details for ${escape(name)}"`} aria-controls="${id}-content" style="display:none;mso-hide:all">
 <label class="disclosure-heading" for="${id}" style="display:block;padding:12px 0;color:#f4f8ff;line-height:1.5;overflow-wrap:anywhere">${title}<span class="disclosure-indicator" aria-hidden="true" style="display:none"></span></label>
 <div class="disclosure-content" id="${id}-content" style="padding-top:12px">${content}</div>
 </div>`;
@@ -491,7 +480,6 @@ function renderItems(section: BriefingSectionResult, items: EmailItem[], timezon
             item.career.subtitle ? `<br><small>${escape(item.career.subtitle)}</small>` : ""
           }`,
           `<p style="margin:0 0 12px;font-size:13px;line-height:1.6">${item.career.details.map(escape).join("<br>")}</p><a class="link" href="${escape(item.url)}" style="display:inline-block;padding:12px 0;line-height:20px;color:#a6e2ff">${escape(item.career.action)} &nearr;</a>`,
-          item.career.title,
         )}</td></tr>`;
       }
       const title = item.news?.title ?? item.text;
@@ -528,19 +516,13 @@ export function renderBriefingEmail(briefing: BriefingModel, template: string): 
   const date = new Intl.DateTimeFormat("en-GB", {
     timeZone: briefing.timezone, weekday: "long", day: "numeric", month: "long", year: "numeric",
   }).format(startOfLocalDay(briefing.reportingDate, briefing.timezone));
-  const credits = new Map<string, EmailItem>();
-  const sections = briefing.sections.map((section) => {
-    const items = sectionItems(section, briefing);
-    for (const item of items) {
-      if (item.compact) credits.set(`${item.text}/${item.url ?? ""}`, item);
-    }
-    return { section, items: items.filter((item) => !item.compact) };
-  });
-  const attribution = [...credits.values()];
+  const sections = briefing.sections.map((section) => ({
+    section, items: sectionItems(section, briefing).filter((item) => !item.compact),
+  }));
   return {
-    text: `${briefing.name}\n${date}\nTimes: ${briefing.timezone}\n\n${sections.map(({ section, items }) =>
+    text: `Intel Agent\n${date}\n\n${sections.map(({ section, items }) =>
       `${sectionTitle(section)}\n${items.map((item) => `- ${item.text}${item.url ? `\n  ${item.url}` : ""}`).join("\n")}`
-    ).join("\n\n")}${attribution.length ? `\n\nData credits\n${attribution.map((item) => `${item.text}${item.url ? `\n${item.url}` : ""}`).join("\n")}` : ""}`,
+    ).join("\n\n")}`,
     html: `<!doctype html>
 <html lang="en">
 <head>
@@ -618,14 +600,9 @@ a { text-decoration: underline; text-underline-offset: 3px; }
 <table role="presentation" width="100%" class="page backdrop" style="width:100%;background-color:#06121f;background-image:url('${codeWallpaper}');background-repeat:repeat;background-position:center top"><tr><td class="outer" align="center" style="padding:40px 20px">
 <!--[if mso]><table role="presentation" width="640" align="center"><tr><td><![endif]-->
 <table role="presentation" width="100%" style="width:100%;max-width:640px;border-collapse:separate;border-spacing:0">
-<tr><td style="padding:0 8px 20px">
-<table role="presentation" width="100%" style="width:100%"><tr><td style="color:#d9eaff;font-size:13px;font-weight:600;letter-spacing:2px"><span aria-hidden="true" style="color:#90d9ff;font-family:'SFMono-Regular',Consolas,monospace;letter-spacing:-2px">&lt;/&gt;</span> &nbsp; INTEL-AGENT</td><td align="right" class="muted" style="color:#adbed0;font-family:'SFMono-Regular',Consolas,monospace;font-size:10px;letter-spacing:1px">DAILY EDITION</td></tr></table>
-</td></tr>
 <tr><td class="header glass" style="padding:36px 32px;background-color:#112537;border:1px solid #4b657b;border-radius:32px">
-<p style="margin:0 0 24px"><span class="pill" style="display:inline-block;padding:7px 12px;border:1px solid #4d718c;border-radius:99px;background-color:#203e55;color:#b5e7ff;font-size:10px;font-weight:600;letter-spacing:2px">YOUR DAY, AT A GLANCE</span></p>
-<h1 class="headline heading" style="margin:0 0 16px;color:#f4f8ff;font-size:48px;font-weight:700;letter-spacing:-2px;line-height:1.05">${escape(briefing.name)}</h1>
+<h1 class="headline heading" style="margin:0 0 16px;color:#f4f8ff;font-size:48px;font-weight:700;letter-spacing:-2px;line-height:1.05">Intel Agent</h1>
 <p class="copy" style="margin:0;color:#e3edf8;font-size:16px;line-height:1.6">${escape(date)}</p>
-<p class="muted" style="margin:20px 0 0;color:#adbed0;font-family:'SFMono-Regular',Consolas,monospace;font-size:11px;line-height:1.6">TIMEZONE &nbsp;/&nbsp; ${escape(briefing.timezone)}</p>
 </td></tr>
 <tr><td style="height:20px;font-size:1px;line-height:20px">&nbsp;</td></tr>
 ${sections.map(({ section, items }, index) => {
@@ -636,13 +613,6 @@ ${sections.map(({ section, items }, index) => {
 ${renderItems(section, items, briefing.timezone, index)}
 </td></tr><tr><td style="height:16px;font-size:1px;line-height:16px">&nbsp;</td></tr>`;
 }).join("")}
-<tr><td align="center" style="padding:12px 24px 24px">
-<p class="muted" style="margin:0 0 12px;color:#adbed0;font-family:'SFMono-Regular',Consolas,monospace;font-size:10px;letter-spacing:2px">END OF BRIEFING &nbsp;/&nbsp; INTEL-AGENT</p>
-<p class="muted" style="margin:0;color:#adbed0;font-size:12px;line-height:1.8">Your personal daily briefing.<br>Times shown in ${escape(briefing.timezone)}. Data is a snapshot, not a live feed.</p>
-${attribution.length ? `<p class="muted" style="margin:16px 0 0;color:#adbed0;font-size:11px;line-height:1.8">${attribution.map((item) =>
-  item.url ? `<a class="muted" href="${escape(item.url)}" style="color:#adbed0;text-decoration:underline">${escape(item.text)}</a>` : escape(item.text),
-).join("<br>")}</p>` : ""}
-</td></tr>
 </table>
 <!--[if mso]></td></tr></table><![endif]-->
 </td></tr></table>

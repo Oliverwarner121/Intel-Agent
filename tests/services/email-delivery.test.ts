@@ -105,29 +105,23 @@ describe("email renderer", () => {
     }
   });
 
-  it("consolidates required weather attribution in the footer outside the section cards", () => {
+  it("omits the footer and data-credit lines", () => {
     const briefing = model();
     briefing.sections[1] = {
       id: "weather", title: "Weather", kind: "weather", outcome: {
-        status: "ok", data: ["Wheatley", "Lower Earley"].map((locationName) => ({
-          locationId: locationName, locationName, date: "2026-07-01", summary: "Clear",
+        status: "ok", data: [{
+          locationId: "wheatley", locationName: "Wheatley", date: "2026-07-01", summary: "Clear",
           temperatureMinC: 10, temperatureMaxC: 20,
-          attribution: {
-            name: "Open-Meteo", url: "https://open-meteo.com/",
-            licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
-          },
-        })),
+          attribution: { name: "Open-Meteo", url: "https://open-meteo.com/", licenceUrl: "https://creativecommons.org/licenses/by/4.0/" },
+        }],
       },
     };
     const rendered = renderBriefingEmail(briefing, "morning-briefing");
     for (const output of [rendered.html, rendered.text]) {
-      expect(output.match(/Weather: Open-Meteo/g)).toHaveLength(1);
-      expect(output.match(/CC BY 4.0/g)).toHaveLength(1);
-      expect(output).not.toContain("weather data by");
-      expect(output.indexOf("Weather: Open-Meteo")).toBeGreaterThan(output.indexOf("Lower Earley: Clear"));
-      expect(output.indexOf("Weather: Open-Meteo")).toBeGreaterThan(output.indexOf("Global Affairs"));
-      expect(output).toContain("https://open-meteo.com/");
-      expect(output).toContain("https://creativecommons.org/licenses/by/4.0/");
+      expect(output).not.toContain("Open-Meteo");
+      expect(output).not.toContain("END OF BRIEFING");
+      expect(output).not.toContain("Your personal daily briefing");
+      expect(output).not.toContain("Data credits");
     }
   });
 
@@ -263,7 +257,7 @@ describe("Resend delivery", () => {
     const body = JSON.parse(String(init?.body));
     expect(body).toMatchObject({ from: env.EMAIL_FROM, to: [env.EMAIL_TO], subject: "Morning briefing" });
     expect(body.html).toContain("<!doctype html>");
-    expect(body.text).toContain("Morning Briefing");
+    expect(body.text).toContain("Intel Agent");
     const headers = new Headers(init?.headers);
     expect(headers.get("idempotency-key")).toMatch(/^morning-briefing\/2026-07-01\/[a-f0-9]{16}$/);
     expect(headers.get("idempotency-key")).toBe(new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get("idempotency-key"));

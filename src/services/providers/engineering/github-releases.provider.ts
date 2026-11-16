@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { engineeringSources } from "@/config/engineering-sources";
 import { fetchJson, HttpError } from "@/lib/http";
+import { selectEngineeringUpdates } from "@/services/processing/career-selection";
 import { SafeError, type EngineeringProvider } from "@/types/briefing";
 import { engineeringUpdateSchema, type CareerSourceFailure } from "@/types/career";
 
@@ -37,6 +38,7 @@ export function createGitHubReleasesProvider(fetchImpl?: typeof fetch): Engineer
           }
           return engineeringUpdateSchema.parse({
             id: `${source.repo}/${release.id}`, source: source.name,
+            kind: "release", category: source.category,
             title: release.name?.trim() || release.tag_name, version: release.tag_name,
             publishedAt: release.published_at, url: release.html_url,
           });
@@ -55,15 +57,7 @@ export function createGitHubReleasesProvider(fetchImpl?: typeof fetch): Engineer
     if (unavailableSources.length === engineeringSources.length) {
       throw new SafeError("All configured GitHub release sources are unavailable; check network access and GitHub rate limits");
     }
-    // One release per product prevents a busy repository crowding out the others.
-    const seenSources = new Set<string>();
-    const updates = results.flatMap((result) => result.updates)
-      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id))
-      .filter((update) => {
-        if (seenSources.has(update.source)) return false;
-        seenSources.add(update.source);
-        return true;
-      }).slice(0, maxUpdates);
+    const updates = selectEngineeringUpdates(results.flatMap((result) => result.updates), window, maxUpdates);
     return { updates, unavailableSources };
   };
 }

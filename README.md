@@ -259,24 +259,51 @@ Free jobs API research (official sources checked 16 November 2026):
 | [Reed](https://www.reed.co.uk/developers/jobseeker) | Key-authenticated UK search/details; private/domestic copying permitted; date-only postings | Implemented for personal hybrid searches with the approved date-window exception; account limits/pricing must be checked |
 | [Arbeitnow UK](https://www.arbeitnow.co.uk/terms) | UK API exists; API terms require a backlink, alongside restrictive general reuse terms | Email redistribution permission remains unresolved; not integrated |
 
-### AI Engineering Updates: official GitHub releases
+### AI Engineering Updates: three official-source categories
 
-The initial allowlist is VS Code, Claude Code, OpenAI Agents SDK for Python,
-LangGraph, CrewAI and PydanticAI. Fetch only public release metadata, not code,
-release bodies or user profiles, using the
-[GitHub releases API](https://docs.github.com/en/rest/releases/releases#list-releases).
-Display the official release title, version, original publication time in London
-time and source link. Exclude drafts, prereleases, future and older releases.
-Choose at most three updates and one release per product, deterministically.
-Independent source failures are shown while successful sources remain usable.
-No releases is different from all sources failing.
+- **Models - Copilot availability:** headlines from GitHub's official
+  [Copilot changelog RSS](https://github.blog/changelog/label/copilot/feed/),
+  which the [changelog](https://github.blog/changelog/) publishes for RSS readers.
+  Classify only titles mentioning models and availability, release, preview or
+  retirement wording (including named models "in GitHub Copilot").
+  Label these as availability announcements, **not original vendor model launches**.
+  Do not invent model versions, capabilities or availability outside Copilot.
+- **Developer tools:** official VS Code and Claude Code stable releases, plus
+  other Copilot changelog headlines. VS Code is a product-release feed, not
+  a guarantee that each release introduces an AI feature.
+- **Agent frameworks:** official stable releases for OpenAI Agents SDK
+  (Python and TypeScript), LangGraph, CrewAI, PydanticAI and Microsoft Agent
+  Framework. SDK/framework versions are software releases, not model releases.
 
-This is not yet a comprehensive model-announcement or proprietary-tool changelog
-feed. No generated summaries are added. Project Spotlight, Developer Tip and
-Resource of the Day remain a later phase.
+Retrieve only title, version where applicable, original publication timestamp
+and source link. GitHub API usage follows its
+[API terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#h-api-terms).
+The public Copilot RSS is used only for attributed headline/date/link metadata;
+do not reproduce article bodies, feed descriptions, images or code.
+No new key, paid service, scraping of blocked sites or generated summary is used.
+The existing `CAREER_INTEL_ENABLED` flag controls this section.
 
-There are six concurrent GitHub requests per run, each bounded to 30 releases,
-six seconds and 1 MiB, without retries or authentication. GitHub documents a
+All categories use the exact preceding rolling 24-hour window. Exclude drafts,
+prereleases, future and older items. Keep at most **three updates total**, first
+reserving one for each category with an eligible item, then filling spare places
+by newest remaining items. Deduplicate IDs, source links and products within
+each category; select deterministically by timestamp then stable ID.
+Show all three category headings, expandable cards and empty-selection messages.
+Independent source failures stay visible and preserve successful categories.
+An empty successful source is not an unavailable source, even if another fails.
+
+Direct OpenAI/Anthropic/Google/DeepSeek/Qwen/Mistral announcement feeds, and
+Cursor/Windsurf changelogs, are **not integrated**. Direct vendor feeds tried
+during setup returned access errors or could not have their terms verified.
+The owner approved the explicitly limited Copilot model-availability coverage.
+This does not establish a complete model feed or guarantee those vendors appear.
+Project Spotlight, Developer Tip and Resource of the Day remain a later phase.
+
+There are eight concurrent GitHub API requests per run, each bounded to 30
+releases, six seconds and 1 MiB, plus one public RSS request with the same timeout
+and size cap. Both have no retries or authentication. XML entities are not
+expanded; unsafe declarations, malformed feeds and off-source links are rejected.
+No links found in feeds or release payloads are fetched. GitHub documents a
 [60 requests/hour limit for unauthenticated REST calls](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api);
 the limit is shared by the originating IP, so shared hosting or frequent previews
 can exhaust it. Failures are explicit, not converted into "no updates".

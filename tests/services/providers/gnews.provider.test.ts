@@ -272,8 +272,7 @@ describe("GNews provider", () => {
     expect(html).not.toContain("<script>unsafe");
     expect(html).toContain("Read more");
     for (const output of [html, text]) {
-      expect(output).toContain("News coverage delayed approximately 12 hours");
-      expect(output.match(/News coverage delayed approximately 12 hours/g)).toHaveLength(1);
+      expect(output).not.toContain("News coverage delayed approximately 12 hours");
       expect(output).not.toContain("Selected from the reporting window");
       expect(output).toContain("Publisher excerpt:");
       expect(output).toContain("Example Publisher");

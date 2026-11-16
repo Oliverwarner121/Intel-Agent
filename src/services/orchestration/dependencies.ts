@@ -15,6 +15,8 @@ import { morningCareerSections, morningMarketsSection } from "@/briefings/defini
 import { SafeError } from "@/types/briefing";
 import { createJobicyProvider } from "@/services/providers/jobs/jobicy.provider";
 import { createGitHubReleasesProvider } from "@/services/providers/engineering/github-releases.provider";
+import { createCopilotChangelogProvider } from "@/services/providers/engineering/copilot-changelog.provider";
+import { createEngineeringProvider } from "@/services/providers/engineering/engineering.provider";
 import { createJobsProvider } from "@/services/providers/jobs/jobs.provider";
 import { createReedProvider } from "@/services/providers/jobs/reed.provider";
 
@@ -39,7 +41,9 @@ export function createBriefingDependencies(env: ServerEnv): OrchestratorDependen
     providers.jobs = { "career-jobs": createJobsProvider(
       createJobicyProvider(), env.REED_API_KEY ? createReedProvider(env.REED_API_KEY) : undefined,
     ) };
-    providers.engineering = { "github-releases": createGitHubReleasesProvider() };
+    providers.engineering = { "engineering-updates": createEngineeringProvider(
+      createGitHubReleasesProvider(), createCopilotChangelogProvider(),
+    ) };
   }
 
   return {

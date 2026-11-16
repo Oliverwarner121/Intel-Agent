@@ -304,8 +304,8 @@ describe("weather orchestration and rendering", () => {
     const rendered = renderBriefingEmail(run.briefing, "morning-briefing");
     for (const output of [rendered.html, rendered.text]) {
       expect(output).toContain("Wheatley (Oxford): Data unavailable:");
-      expect(output).toContain(output === rendered.html ? ">Wotton-under-Edge</h3>" : "Wotton-under-Edge: Overcast");
-      expect(output).toContain(output === rendered.html ? ">Lower Earley, Reading</h3>" : "Lower Earley, Reading: Overcast");
+      expect(output).toContain(output === rendered.html ? ">Wotton-under-Edge</span>" : "Wotton-under-Edge: Overcast");
+      expect(output).toContain(output === rendered.html ? ">Lower Earley, Reading</span>" : "Lower Earley, Reading: Overcast");
       expect(output).toContain("https://open-meteo.com/");
       expect(output).toContain("https://creativecommons.org/licenses/by/4.0/");
       expect(output).toContain("Official weather warnings are not supplied");

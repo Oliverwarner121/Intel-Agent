@@ -14,6 +14,8 @@ function quote(symbol = "NVDA") {
     symbol, exchange: crypto ? "Coinbase Pro" : "NASDAQ",
     ...(crypto ? {} : { currency: "USD", mic_code: "XNGS" }),
     close: "110.00", previous_close: "100.00", rolling_1d_change: "-2.50",
+    datetime: crypto ? "2026-11-05" : "2026-11-04",
+    open: "105.00", high: "115.00", low: "95.00", volume: crypto ? null : "1250000",
     last_quote_at: Math.floor(new Date(crypto ? "2026-11-05T04:59:00Z" : "2026-11-04T21:00:00Z").getTime() / 1000),
   };
 }
@@ -31,6 +33,7 @@ describe("Twelve Data provider", () => {
     expect(result[0]).toMatchObject({
       assetId: "nvda", price: 110, priceType: "close", asOf: "2026-11-04T21:00:00.000Z", stale: false,
       change: { basis: "previous-close", percent: expect.closeTo(10, 8) },
+      session: { date: "2026-11-04", open: 105, high: 115, low: 95, previousClose: 100, volume: 1250000 },
       source: { name: "Twelve Data (NASDAQ)", url: "https://twelvedata.com/" },
     });
     expect(result[5]).toMatchObject({
@@ -57,6 +60,35 @@ describe("Twelve Data provider", () => {
     }));
     expect((await createTwelveDataProvider("key", fetchImpl)(request(["nvda"])))[0])
       .toMatchObject({ status: "ok", asOf: "2026-11-04T21:00:00.000Z" });
+  });
+
+  it("preserves zero volume and missing optional session fields without making extra requests", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ...quote(), open: null, high: undefined, low: null, datetime: null, volume: "0",
+    }));
+    expect((await createTwelveDataProvider("key", fetchImpl)(request(["nvda"])))[0])
+      .toMatchObject({ status: "ok", session: { previousClose: 100, volume: 0 } });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const missing = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      ...quote(), open: null, high: null, low: null, previous_close: null, datetime: null, volume: null,
+    }));
+    expect((await createTwelveDataProvider("key", missing)(request(["nvda"])))[0])
+      .toMatchObject({ status: "ok", session: {} });
+  });
+
+  it.each([
+    { high: "90" }, { low: "120" }, { open: "116" }, { high: "105", low: "100" },
+    { volume: "-1" }, { volume: "9007199254740992" }, { open: "NaN" },
+    { datetime: "2026-02-30" }, { datetime: "2026-11-06" },
+  ])("rejects invalid daily session data %j without affecting other assets", async (fields) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const symbol = new URL(String(input)).searchParams.get("symbol") ?? "";
+      return Response.json({ ...quote(symbol), ...(symbol === "NVDA" ? fields : {}) });
+    });
+    const result = await createTwelveDataProvider("key", fetchImpl)(request(["nvda", "aapl"]));
+    expect(result[0]?.status).toBe("unavailable");
+    expect(result[1]?.status).toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("preserves zero changes and labels missing changes unavailable instead of inventing them", async () => {

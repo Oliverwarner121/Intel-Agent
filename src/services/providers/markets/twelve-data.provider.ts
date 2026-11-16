@@ -2,7 +2,7 @@ import { z } from "zod";
 import { marketAssets } from "@/config/market-assets";
 import { fetchJson, HttpError } from "@/lib/http";
 import { SafeError, type MarketsProvider } from "@/types/briefing";
-import type { MarketAsset, MarketAssetResult } from "@/types/markets";
+import { marketAssetResultSchema, type MarketAsset, type MarketAssetResult } from "@/types/markets";
 
 const decimal = z.string().regex(/^-?\d+(?:\.\d+)?$/).transform(Number).pipe(z.number().finite());
 const optionalDecimal = decimal.nullish();
@@ -15,6 +15,11 @@ const quoteSchema = z.object({
   last_quote_at: z.int().positive(),
   previous_close: optionalDecimal,
   rolling_1d_change: optionalDecimal,
+  datetime: z.iso.date().nullish(),
+  open: optionalDecimal,
+  high: optionalDecimal,
+  low: optionalDecimal,
+  volume: optionalDecimal,
 });
 const errorSchema = z.object({ status: z.literal("error"), code: z.int() });
 const responseSchema = z.union([errorSchema, quoteSchema]);
@@ -37,13 +42,29 @@ function transform(
       ? undefined
       : { percent: (quote.close / quote.previous_close - 1) * 100, basis: "previous-close" as const };
   if (change && !Number.isFinite(change.percent)) throw new SafeError("Market quote has an invalid change");
-  return {
+  if (quote.datetime && quote.datetime > now.toISOString().slice(0, 10)) {
+    throw new SafeError("Market quote has a future session date");
+  }
+  const result: MarketAssetResult = {
     assetId: asset.id, status: "ok", price: quote.close, asOf: instant.toISOString(),
     priceType: asset.kind === "stock" ? "close" : "last-trade",
     stale: now.getTime() - instant.getTime() > (asset.kind === "stock" ? 7 * 86_400_000 : 15 * 60_000),
     ...(change ? { change } : {}),
+    session: {
+      ...(quote.datetime ? { date: quote.datetime } : {}),
+      ...(quote.open !== null && quote.open !== undefined ? { open: quote.open } : {}),
+      ...(quote.high !== null && quote.high !== undefined ? { high: quote.high } : {}),
+      ...(quote.low !== null && quote.low !== undefined ? { low: quote.low } : {}),
+      ...(quote.previous_close !== null && quote.previous_close !== undefined && quote.previous_close > 0
+        ? { previousClose: quote.previous_close } : {}),
+      ...(quote.volume !== null && quote.volume !== undefined ? { volume: quote.volume } : {}),
+    },
     source: { name: `Twelve Data (${quote.exchange})`, url: "https://twelvedata.com/" },
   };
+  if (!marketAssetResultSchema.safeParse(result).success) {
+    throw new SafeError("Market quote has invalid or inconsistent session data");
+  }
+  return result;
 }
 
 export function createTwelveDataProvider(apiKey: string, fetchImpl?: typeof fetch): MarketsProvider {

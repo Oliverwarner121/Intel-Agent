@@ -125,7 +125,6 @@ describe("regional warning collection", () => {
     expect(text.match(/Met Office regional warnings/g)).toHaveLength(2);
     expect(text).toContain("Regional coverage may not affect your exact location");
     expect(text).toContain("Yellow warning of rain");
-    expect(text).toContain("Open Government Licence v3.0");
     expect(html).toContain('href="https://www.metoffice.gov.uk/weather/warnings-and-advice/uk-warnings#example"');
     expect(html).not.toContain("Official weather warnings are not supplied");
   });
@@ -140,11 +139,8 @@ describe("regional warning collection", () => {
     if (!run.briefing) throw new Error("Missing briefing");
     const rendered = renderBriefingEmail(run.briefing, "morning-briefing");
     for (const output of [rendered.html, rendered.text]) {
-      expect(output.match(/Met Office regional warnings/g)).toHaveLength(1);
-      expect(output.match(/No warnings listed/g)).toHaveLength(1);
-      expect(output).toContain("South West England");
-      expect(output).toContain(output === rendered.html ? "London &amp; South East England" : "London & South East England");
-      expect(output).toContain("when checked");
+      expect(output).not.toContain("Met Office regional warnings");
+      expect(output.match(/No weather warnings for today/g)).toHaveLength(1);
     }
   });
 
@@ -161,7 +157,7 @@ describe("regional warning collection", () => {
     if (!run.briefing) throw new Error("Missing briefing");
     const { text } = renderBriefingEmail(run.briefing, "morning-briefing");
     expect(text).toContain("Warnings unavailable:");
-    expect(text).toContain("No warnings listed in this regional feed");
+    expect(text).toMatch(/No warnings listed for /);
     expect(text).toContain("Clear");
   });
 

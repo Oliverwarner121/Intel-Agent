@@ -33,6 +33,62 @@ function model(): BriefingModel {
 const request = (): DeliveryRequest => ({ briefing: model(), template: "morning-briefing", subject: "Morning briefing" });
 
 describe("email renderer", () => {
+  it("keeps Oxford, calendar and warnings visible, with independent collapsed weather and news controls", () => {
+    const briefing = model();
+    briefing.sections[1] = {
+      id: "weather", title: "Weather", kind: "weather", outcome: {
+        status: "ok", data: [
+          { locationId: "wotton-under-edge", locationName: "Wotton-under-Edge" },
+          { locationId: "wheatley", locationName: "Wheatley (Oxford)" },
+          { locationId: "lower-earley", locationName: "Lower Earley, Reading" },
+        ].map((location) => ({
+          ...location, date: "2026-07-01", summary: "Clear", temperatureMinC: 10, temperatureMaxC: 20,
+          hourlyUnavailableReason: "Hourly feed unavailable",
+          warnings: {
+            status: "ok", region: "South West England", checkedAt: "2026-07-01T04:55:00Z",
+            warnings: [{ title: "Yellow rain warning", url: "https://example.com/warning", publishedAt: "2026-07-01T04:00:00Z" }],
+          },
+        })),
+      },
+    };
+    for (const [index, category] of [[2, "tech-ai"], [3, "uk-politics-finance"]] as const) {
+      briefing.sections[index] = {
+        id: category, title: category, kind: "news", outcome: { status: "ok", data: [{
+          title: 'Headline <test> & "news"', description: "An excerpt <script> & details",
+          publisher: "Publisher", publishedAt: "2026-07-01T04:00:00Z", category,
+          url: "https://example.com/story",
+        }] },
+      };
+    }
+    const { html, text } = renderBriefingEmail(briefing, "morning-briefing");
+    const labels = [...html.matchAll(/<label class="disclosure-heading"[^>]*>([\s\S]*?)<\/label>/g)]
+      .map((match) => match[1]);
+    expect(labels).toHaveLength(4);
+    expect(labels.join("")).toContain("Wotton-under-Edge");
+    expect(labels.join("")).toContain("Lower Earley, Reading");
+    expect(labels.join("")).not.toMatch(/Oxford|Office|Yellow rain warning|Hourly feed|excerpt|Publisher/);
+    expect(html).toContain(">Wheatley (Oxford)</h3>");
+    expect(html).toContain('aria-label="Show details for Headline &lt;test&gt; &amp; &quot;news&quot;"');
+    expect(html).toContain("An excerpt &lt;script&gt; &amp; details");
+    expect(html).not.toContain("<script>");
+    const inputs = [...html.matchAll(/<input class="disclosure-toggle"[^>]*>/g)].map((match) => match[0]);
+    expect(inputs).toHaveLength(4);
+    expect(inputs.every((input) => !/\schecked\b/.test(input))).toBe(true);
+    const ids = inputs.map((input) => input.match(/ id="([^"]+)"/)?.[1]);
+    expect(new Set(ids).size).toBe(4);
+    for (const id of ids) {
+      expect(html).toContain(`for="${id}"`);
+      expect(html).toContain(`aria-controls="${id}-content"`);
+      expect(html).toContain(`id="${id}-content"`);
+    }
+    expect(html).toMatch(/<td[^>]*><a[^>]*>Yellow rain warning \(issued[^<]*<\/a><\/td>/);
+    expect(text).toContain("All day: Office");
+    expect(text).toContain("Yellow rain warning");
+    expect(text).toContain("Hourly forecast unavailable: Hourly feed unavailable");
+    expect(text).toContain("An excerpt <script> & details");
+    expect(text).not.toContain("<input");
+  });
+
   it("adds matching emojis to every section heading in HTML and plain text", () => {
     const briefing = model();
     briefing.sections.push({
@@ -49,29 +105,23 @@ describe("email renderer", () => {
     }
   });
 
-  it("consolidates required weather attribution in the footer outside the section cards", () => {
+  it("omits the footer and data-credit lines", () => {
     const briefing = model();
     briefing.sections[1] = {
       id: "weather", title: "Weather", kind: "weather", outcome: {
-        status: "ok", data: ["Wheatley", "Lower Earley"].map((locationName) => ({
-          locationId: locationName, locationName, date: "2026-07-01", summary: "Clear",
+        status: "ok", data: [{
+          locationId: "wheatley", locationName: "Wheatley", date: "2026-07-01", summary: "Clear",
           temperatureMinC: 10, temperatureMaxC: 20,
-          attribution: {
-            name: "Open-Meteo", url: "https://open-meteo.com/",
-            licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
-          },
-        })),
+          attribution: { name: "Open-Meteo", url: "https://open-meteo.com/", licenceUrl: "https://creativecommons.org/licenses/by/4.0/" },
+        }],
       },
     };
     const rendered = renderBriefingEmail(briefing, "morning-briefing");
     for (const output of [rendered.html, rendered.text]) {
-      expect(output.match(/Weather: Open-Meteo/g)).toHaveLength(1);
-      expect(output.match(/CC BY 4.0/g)).toHaveLength(1);
-      expect(output).not.toContain("weather data by");
-      expect(output.indexOf("Weather: Open-Meteo")).toBeGreaterThan(output.indexOf("Lower Earley: Clear"));
-      expect(output.indexOf("Weather: Open-Meteo")).toBeGreaterThan(output.indexOf("Global Affairs"));
-      expect(output).toContain("https://open-meteo.com/");
-      expect(output).toContain("https://creativecommons.org/licenses/by/4.0/");
+      expect(output).not.toContain("Open-Meteo");
+      expect(output).not.toContain("END OF BRIEFING");
+      expect(output).not.toContain("Your personal daily briefing");
+      expect(output).not.toContain("Data credits");
     }
   });
 
@@ -84,9 +134,35 @@ describe("email renderer", () => {
     expect(html).toContain('role="presentation"');
     expect(html).toContain("max-width:640px");
     expect(html).toContain("<!--[if mso]>");
-    expect(html).toContain("background-color:#ffffff");
+    expect(html).toContain("background-color:#112537");
     expect(html).not.toMatch(/<script|<iframe|<img|@import|<link /);
     expect(text).not.toContain("<table");
+  });
+
+  it("keeps the coding wallpaper self-contained and out of the plain-text briefing", () => {
+    const { html, text } = renderBriefingEmail(model(), "morning-briefing");
+    const wallpaper = html.match(/background-image:url\('(data:image\/svg\+xml,[^']+)'\)/)?.[1];
+    expect(wallpaper).toBeDefined();
+    const decoration = decodeURIComponent(wallpaper ?? "");
+    expect(decoration).toContain("<svg");
+    expect(decoration).toMatch(/>01[01]+<\/text>/);
+    expect(decoration).not.toMatch(/<script|<image|\bhref=|<foreignObject/);
+    expect(html).not.toMatch(/url\(['"]?https?:/);
+    expect(text).not.toMatch(/data:image|<svg|010011010110/);
+  });
+
+  it("retains readable surfaces and failure notices when enhancement styles are stripped", () => {
+    const { html } = renderBriefingEmail(model(), "morning-briefing");
+    const fallback = html.replace(/<style>[\s\S]*?<\/style>/, "");
+    expect(fallback).not.toContain("backdrop-filter");
+    expect(fallback).toMatch(/class="header glass"[^>]*background-color:#112537/);
+    expect(fallback).toMatch(/class="glass card"[^>]*background-color:#112537/);
+    expect(fallback).toMatch(/class="heading section-heading"[^>]*color:#f4f8ff/);
+    expect(fallback).toMatch(/class="copy rule notice"[^>]*color:#ffd28c[^>]*>Data unavailable: Not configured/);
+    expect(fallback).toContain("All day: Office");
+    expect(fallback).toContain("No stories selected.");
+    expect(html).toContain("prefers-reduced-transparency: reduce");
+    expect(html).toContain("prefers-contrast: more");
   });
 
   it("renders both formats in section order with UK times and escaped text", () => {
@@ -154,7 +230,7 @@ describe("email renderer", () => {
     expect(rendered.html).toContain("Temperature 0–10 °C");
     expect(rendered.html).toContain("Precipitation up to 0%");
     expect(rendered.html).toContain("Wind up to 0 km/h");
-    expect(rendered.html.indexOf(">Wheatley</h3>")).toBeLessThan(rendered.html.indexOf("border-radius:10px"));
+    expect(rendered.html.indexOf(">Wheatley</h3>")).toBeLessThan(rendered.html.indexOf('class="inset rule"'));
   });
 
   it("displays winter times without the summer offset", () => {
@@ -181,7 +257,7 @@ describe("Resend delivery", () => {
     const body = JSON.parse(String(init?.body));
     expect(body).toMatchObject({ from: env.EMAIL_FROM, to: [env.EMAIL_TO], subject: "Morning briefing" });
     expect(body.html).toContain("<!doctype html>");
-    expect(body.text).toContain("Morning Briefing");
+    expect(body.text).toContain("Intel Agent");
     const headers = new Headers(init?.headers);
     expect(headers.get("idempotency-key")).toMatch(/^morning-briefing\/2026-07-01\/[a-f0-9]{16}$/);
     expect(headers.get("idempotency-key")).toBe(new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get("idempotency-key"));

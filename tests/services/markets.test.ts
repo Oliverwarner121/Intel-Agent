@@ -182,10 +182,46 @@ describe("market foundation", () => {
       ...valid, change: { percent: NaN, basis: "24-hours" },
     }).success).toBe(false);
   });
+
+  it.each([
+    { low: 150, high: 100 }, { low: 100, high: 120 }, { open: 99, low: 100, high: 150 },
+    { volume: -1 }, { volume: Infinity }, { date: "2026-02-30" },
+  ])("rejects invalid session details before orchestration or rendering: %j", async (session) => {
+    const invalid = { ...snapshot("nvda"), session };
+    expect(marketAssetResultSchema.safeParse(invalid).success).toBe(false);
+    expect((await run(async () => [invalid])).briefing?.sections.at(-1)?.outcome).toEqual({
+      status: "unavailable", reason: "Market provider returned invalid data",
+    });
+    expect(() => renderBriefingEmail(model([invalid]), "morning-briefing")).toThrow(SafeError);
+  });
 });
 
 describe("market rendering", () => {
-  it("colours crypto gains green and losses red, keeping zero and missing changes neutral", () => {
+  it("keeps only names, prices and stale notices in collapsed headers while preserving failures and details", () => {
+    const stock = snapshot("nvda");
+    if (stock.status !== "ok") throw new Error("Invalid fixture");
+    const { html, text } = renderBriefingEmail(model([
+      { ...stock, stale: true, session: { low: 100, high: 150, volume: 0 } },
+      { ...stock, assetId: "bitcoin", priceType: "last-trade" },
+      { assetId: "ethereum", status: "unavailable", reason: "Quote unavailable" },
+    ]), "morning-briefing");
+    const labels = [...html.matchAll(/<label class="disclosure-heading"[^>]*>([\s\S]*?)<\/label>/g)]
+      .map((match) => match[1]);
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toContain("Nvidia (NVDA)");
+    expect(labels[0]).toContain("USD");
+    expect(labels[0]).toContain("123.45");
+    expect(labels[0]).toContain("Stale quote");
+    expect(labels[1]).toContain("Bitcoin (BTC/GBP)");
+    expect(labels[1]).toContain("GBP");
+    expect(labels.join("")).not.toMatch(/Session range|Volume|previous close|closing price/);
+    expect(html).toContain("Data unavailable: Quote unavailable");
+    expect(html).toContain("Session range:");
+    expect(text).toContain("Volume: 0");
+    expect(text).toContain("(stale)");
+  });
+
+  it("colours gains green and losses red, keeping zero and missing changes neutral", () => {
     const asset = snapshot("bitcoin");
     if (asset.status !== "ok") throw new Error("Invalid fixture");
     const { html, text } = renderBriefingEmail(model([
@@ -193,11 +229,13 @@ describe("market rendering", () => {
       { ...asset, assetId: "ethereum", change: { percent: -1.25, basis: "24-hours" } },
       { ...asset, assetId: "xrp", change: { percent: 0, basis: "24-hours" } },
       { ...asset, assetId: "nvda", change: undefined },
+      { ...asset, assetId: "aapl", change: { percent: -3, basis: "previous-close" } },
     ]), "morning-briefing");
-    expect(html).toMatch(/class="change-positive rule"[^>]*color:#137347[^>]*>\+2\.50% over 24 hours/);
-    expect(html).toMatch(/class="change-negative rule"[^>]*color:#b42332[^>]*>-1\.25% over 24 hours/);
+    expect(html).toMatch(/class="change-positive rule"[^>]*color:#75dfa7[^>]*>\+2\.50% over 24 hours/);
+    expect(html).toMatch(/class="change-negative rule"[^>]*color:#ff9aa5[^>]*>-1\.25% over 24 hours/);
     expect(html).toMatch(/class="copy rule"[^>]*>0\.00% over 24 hours/);
     expect(html).toMatch(/class="copy rule"[^>]*>change unavailable/);
+    expect(html).toMatch(/class="change-negative rule"[^>]*color:#ff9aa5[^>]*>-3\.00% vs previous close/);
     expect(html).toContain(".change-positive { color: #75dfa7 !important; }");
     expect(html).toContain(".change-negative { color: #ff9aa5 !important; }");
     expect(text).toContain("+2.50% over 24 hours");
@@ -230,12 +268,69 @@ describe("market rendering", () => {
     }
     expect(rendered.text).toMatch(/XRP \(XRP\/USD\): USD\s*1\.2345/);
     expect(rendered.html).toContain('aria-label="Market snapshots"');
-    expect(rendered.html).toContain('scope="col"');
-    expect(rendered.html).toContain('scope="row"');
-    expect(rendered.html).toContain(">Asset</th>");
-    expect(rendered.html).toContain(">Price</th>");
-    expect(rendered.html).toContain(">Change</th>");
+    expect(rendered.html.match(/class="inset market-card"/g)).toHaveLength(4);
+    expect(rendered.html).toContain(">Nvidia (NVDA)</span>");
+    expect(rendered.html).toContain("Session range unavailable");
     expect(rendered.text.indexOf("Stocks (USD)")).toBeLessThan(rendered.text.indexOf("Crypto (BTC/ETH in GBP; XRP in USD)"));
+  });
+
+  it("renders last-session cards with genuine range positions, daily statistics and matching plain text", () => {
+    const asset = snapshot("nvda");
+    if (asset.status !== "ok") throw new Error("Invalid fixture");
+    const rendered = renderBriefingEmail(model([{
+      ...asset, price: 125,
+      change: { percent: (125 / 120 - 1) * 100, basis: "previous-close" },
+      session: { date: "2026-06-30", open: 110, low: 100, high: 150, previousClose: 120, volume: 0 },
+    }]), "morning-briefing");
+    for (const output of [rendered.html, rendered.text]) {
+      expect(output).toContain("Last completed session");
+      expect(output).toContain("30 Jun 2026");
+      expect(output).toContain("110.00");
+      expect(output).toContain("120.00");
+      expect(output).toContain("100.00");
+      expect(output).toContain("150.00");
+      expect(output).toContain("Volume");
+      expect(output).toContain("Session change");
+      expect(output).toContain("+4.17% vs previous close");
+    }
+    expect(rendered.text).toMatch(/Volume: 0/);
+    expect(rendered.text).toMatch(/Session change: \+USD\s*5\.00/);
+    expect(rendered.html).toContain('role="img" aria-label="Session range:');
+    expect(rendered.html).toContain("close at 50% of the range.");
+    expect(rendered.html).toContain('width="50%" height="10"');
+    expect(rendered.html).toMatch(/class="change-negative"[^>]*color:#ff9aa5[^>]*>Low/);
+    expect(rendered.html).toMatch(/class="change-positive"[^>]*color:#75dfa7[^>]*>High/);
+  });
+
+  it.each([
+    { price: 100, high: 150, position: 0 },
+    { price: 150, high: 150, position: 100 },
+    { price: 100, high: 100, position: undefined },
+  ])("handles a close at a range endpoint or a flat session: %j", ({ price, high, position }) => {
+    const asset = snapshot("nvda");
+    if (asset.status !== "ok") throw new Error("Invalid fixture");
+    const rendered = renderBriefingEmail(model([{
+      ...asset, price, session: { low: 100, high, open: price },
+    }]), "morning-briefing");
+    expect(rendered.html).not.toMatch(/NaN|Infinity|width="0%"/);
+    expect(rendered.html).toContain(position === undefined
+      ? "Flat session: high, low and price are equal."
+      : `White marker: close within the range (${position}%).`);
+  });
+
+  it("does not mistake the crypto daily bar for a completed session or rolling 24-hour range", () => {
+    const asset = snapshot("bitcoin");
+    if (asset.status !== "ok") throw new Error("Invalid fixture");
+    const rendered = renderBriefingEmail(model([{
+      ...asset, priceType: "last-trade", change: { percent: 2, basis: "24-hours" },
+      session: { low: 100, high: 150, open: 120 },
+    }]), "morning-briefing");
+    for (const output of [rendered.html, rendered.text]) {
+      expect(output).toContain("Quoted daily bar");
+      expect(output).toContain("Daily-bar range");
+      expect(output).toContain("24-hour change and daily-bar range cover different periods.");
+      expect(output).not.toContain("Last completed session");
+    }
   });
 
   it("shows winter timestamps, absent changes and per-asset failures explicitly", () => {

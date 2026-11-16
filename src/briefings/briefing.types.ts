@@ -39,11 +39,23 @@ const marketsSectionSchema = z.object({
     .refine((ids) => new Set(ids).size === ids.length, "market asset IDs must be unique"),
 });
 
+const jobsSectionSchema = z.object({
+  ...sectionBase, kind: z.literal("jobs"), maxJobs: z.int().min(1).max(10),
+  windowHours: z.literal(24),
+});
+
+const engineeringSectionSchema = z.object({
+  ...sectionBase, kind: z.literal("engineering"), maxUpdates: z.int().min(1).max(3),
+  windowHours: z.literal(24),
+});
+
 export const briefingSectionSchema = z.discriminatedUnion("kind", [
   calendarSectionSchema,
   weatherSectionSchema,
   newsSectionSchema,
   marketsSectionSchema,
+  jobsSectionSchema,
+  engineeringSectionSchema,
 ]);
 
 export const briefingDefinitionSchema = z.object({

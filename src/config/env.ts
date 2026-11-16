@@ -21,6 +21,8 @@ const serverEnvSchema = z.object({
   EMAIL_SEND_ENABLED: z.enum(["true", "false"]).optional(),
   TWELVE_DATA_API_KEY: optionalSecret,
   MARKETS_ENABLED: z.enum(["true", "false"]).optional(),
+  CAREER_INTEL_ENABLED: z.enum(["true", "false"]).optional(),
+  REED_API_KEY: optionalSecret,
 }).superRefine((env, context) => {
   if (env.MARKETS_ENABLED === "true" && !env.TWELVE_DATA_API_KEY) {
     context.addIssue({ code: "custom", path: ["TWELVE_DATA_API_KEY"], message: "required when markets are enabled" });

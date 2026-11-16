@@ -4,12 +4,15 @@ import type { CalendarCollection, CalendarEvent, CalendarRetrievalFailure } from
 import type { NewsCategory, NewsCollection, NewsStory } from "@/types/news";
 import type { WeatherLocationResult } from "@/types/weather";
 import type { MarketAssetId, MarketAssetResult } from "@/types/markets";
+import type { CareerSourceFailure, EngineeringCollection, EngineeringUpdate, JobGroup, JobsCollection } from "@/types/career";
 
 export interface SectionDataByKind {
   calendar: CalendarEvent[];
   weather: WeatherLocationResult[];
   news: NewsStory[];
   markets: MarketAssetResult[];
+  jobs: JobGroup[];
+  engineering: EngineeringUpdate[];
 }
 
 /** Empty data is "ok" with no items; failed retrieval is "unavailable". */
@@ -19,7 +22,12 @@ export type SectionOutcome<K extends SectionKind> =
   | (K extends "calendar" ? {
     status: "partial"; data: CalendarEvent[]; unavailableCalendars: CalendarRetrievalFailure[];
   } : never)
-  | (K extends "weather" | "markets" ? { status: "partial"; data: SectionDataByKind[K] } : never);
+  | (K extends "weather" | "markets" | "jobs" ? {
+    status: "partial"; data: SectionDataByKind[K]; notice?: string;
+  } : never)
+  | (K extends "engineering" ? {
+    status: "partial"; data: EngineeringUpdate[]; unavailableSources: CareerSourceFailure[];
+  } : never);
 
 export type BriefingSectionResult = {
   [K in SectionKind]: { id: string; title: string; kind: K; outcome: SectionOutcome<K> };
@@ -58,12 +66,22 @@ export type MarketsProvider = (
   request: ProviderContext & { assetIds: MarketAssetId[] },
 ) => Promise<MarketAssetResult[]>;
 
+export type JobsProvider = (
+  request: ProviderContext & { window: ReportingPeriod; maxJobs: number },
+) => Promise<JobsCollection>;
+
+export type EngineeringProvider = (
+  request: ProviderContext & { window: ReportingPeriod; maxUpdates: number },
+) => Promise<EngineeringCollection>;
+
 /** Provider implementations keyed by the provider ID used in definitions. */
 export interface ProviderRegistry {
   calendar: Partial<Record<string, CalendarProvider>>;
   weather: Partial<Record<string, WeatherProvider>>;
   news: Partial<Record<string, NewsProvider>>;
   markets?: Partial<Record<string, MarketsProvider>>;
+  jobs?: Partial<Record<string, JobsProvider>>;
+  engineering?: Partial<Record<string, EngineeringProvider>>;
 }
 
 export interface DeliveryRequest {
